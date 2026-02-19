@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-950 text-slate-200 antialiased selection:bg-emerald-500/30 selection:text-emerald-200;
+  font-family: 'Inter', sans-serif;
+  background-image:
+    radial-gradient(circle at 50% 0%, #1e293b 0%, transparent 75%),
+    radial-gradient(circle at 100% 0%, #0f172a 0%, transparent 50%);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full hover:bg-slate-600 transition-colors;
+}
+
+/* Animations */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.glass-panel {
+  @apply bg-slate-900/60 backdrop-blur-xl border border-white/5 shadow-2xl;
+}
+
+.input-field {
+  @apply w-full bg-slate-950/50 border border-slate-700 rounded-lg p-3 text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 outline-none transition-all duration-200 placeholder:text-slate-600;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg shadow-emerald-500/20 transform hover:-translate-y-0.5 transition-all duration-200 active:translate-y-0;
+}
+
+.btn-danger {
+  @apply bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 font-bold py-2 px-4 rounded-lg transition-all duration-200;
+}
