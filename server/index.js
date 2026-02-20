@@ -6,6 +6,8 @@ const cors = require('cors');
 const botService = require('./bot');
 const fs = require('fs');
 const path = require('path');
+const igRouter = require('./instagram/routes');
+const igWorker = require('./instagram/worker');
 
 const app = express();
 const server = http.createServer(app);
@@ -30,6 +32,9 @@ io.on('connection', (socket) => {
         connectedClients = connectedClients.filter(c => c !== socket);
     });
 });
+
+// Pass 'io' via app so routers can access it
+app.set('io', io);
 
 // Function to broadcast logs to frontend
 const broadcastLog = (message, type = 'info') => {
@@ -355,6 +360,10 @@ app.post('/api/whatsapp/optout-config', (req, res) => {
     }
 });
 
+
+// --- Instagram Social Media Module ---
+app.use('/api/ig', igRouter);
+igWorker.start(io);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
