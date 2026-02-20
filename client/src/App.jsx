@@ -6,6 +6,7 @@ import ConfigForm from './components/ConfigForm';
 import GoogleMapsPanel from './components/GoogleMapsPanel';
 import GoogleMapsResults from './components/GoogleMapsResults';
 import WhatsAppSender from './components/WhatsAppSender';
+import SocialMediaPanel from './components/SocialMediaPanel';
 import { Activity, Radio, Cpu, Settings, Terminal, ShieldCheck, Smartphone } from 'lucide-react';
 
 const socket = io('http://localhost:3000');
@@ -133,8 +134,14 @@ function App() {
 
       {/* Background Ambience */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
-        <div className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-emerald-500/10' : 'bg-red-500/10'}`} />
-        <div className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-blue-500/10' : 'bg-orange-500/10'}`} style={{ animationDelay: '-3s' }} />
+        <div className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-emerald-500/10' :
+            activeTab === 'socialmedia' ? 'bg-purple-500/10' :
+              'bg-red-500/10'
+          }`} />
+        <div className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-blue-500/10' :
+            activeTab === 'socialmedia' ? 'bg-pink-500/10' :
+              'bg-orange-500/10'
+          }`} style={{ animationDelay: '-3s' }} />
       </div>
 
       <div className="w-full max-w-7xl space-y-6">
@@ -148,8 +155,15 @@ function App() {
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight">System Ecosystem</h1>
               <p className="text-slate-400 text-sm flex items-center gap-2">
-                <ShieldCheck className={`w-3 h-3 ${activeTab === 'instagram' ? 'text-emerald-500' : activeTab === 'maps' ? 'text-red-500' : 'text-green-500'}`} />
-                {activeTab === 'instagram' ? 'Instagram Prospector' : activeTab === 'maps' ? 'Google Maps Extractor' : 'WhatsApp Mass Sender'}
+                <ShieldCheck className={`w-3 h-3 ${activeTab === 'instagram' ? 'text-emerald-500' :
+                    activeTab === 'maps' ? 'text-red-500' :
+                      activeTab === 'socialmedia' ? 'text-purple-400' :
+                        'text-green-500'
+                  }`} />
+                {activeTab === 'instagram' ? 'Instagram Prospector' :
+                  activeTab === 'maps' ? 'Google Maps Extractor' :
+                    activeTab === 'socialmedia' ? 'Social Media Scheduler' :
+                      'WhatsApp Mass Sender'}
               </p>
             </div>
           </div>
@@ -172,6 +186,12 @@ function App() {
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'whatsapp' ? 'bg-green-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
             >
               WhatsApp
+            </button>
+            <button
+              onClick={() => setActiveTab('socialmedia')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'socialmedia' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+            >
+              Social Media
             </button>
           </div>
 
@@ -272,6 +292,10 @@ function App() {
                 />
               </div>
             </>
+
+          ) : activeTab === 'socialmedia' ? (
+            // SOCIAL MEDIA LAYOUT
+            <SocialMediaPanel socket={socket} />
 
           ) : (
             // WHATSAPP LAYOUT - using fragments so panels are direct children of the 12-col grid
