@@ -6,8 +6,12 @@ const cors = require('cors');
 const botService = require('./bot');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 const igRouter = require('./instagram/routes');
 const igWorker = require('./instagram/worker');
+const { removeInteraction } = require('./bot/history_db');
+const historyDb = require('./bot/history_db');
+const mapsDb = require('./db/maps_db');
 
 const app = express();
 const server = http.createServer(app);
@@ -139,6 +143,34 @@ app.post('/api/profiles', (req, res) => {
 });
 
 // APIs
+// Set up multer for bot audio uploads
+const BOT_AUDIOS_DIR = path.join(__dirname, 'uploads', 'bot_audios');
+if (!fs.existsSync(path.join(__dirname, 'uploads'))) fs.mkdirSync(path.join(__dirname, 'uploads'));
+if (!fs.existsSync(BOT_AUDIOS_DIR)) fs.mkdirSync(BOT_AUDIOS_DIR);
+
+const botAudioStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, BOT_AUDIOS_DIR),
+    filename: (req, file, cb) => {
+        // NOTE: req.body is NOT populated yet when filename() is called,
+        // because multer processes the file stream before text fields.
+        // Use a pure random name; the response returns the filename so the
+        // frontend can associate it with the correct audio slot.
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, 'audio-' + uniqueSuffix + '.webm');
+    }
+});
+const uploadBotAudio = multer({ storage: botAudioStorage });
+
+app.post('/api/bot/upload-audio', uploadBotAudio.single('audio'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+    // Now req.body.id IS available (after multer finishes)
+    const slotId = req.body.id || 'unknown';
+    res.json({ success: true, path: req.file.path, filename: req.file.filename, slotId });
+});
+
+// Serve the audios so Puppeteer can fetch them for the fake media stream
+app.use('/api/bot/media', express.static(BOT_AUDIOS_DIR));
+
 app.post('/api/start', async (req, res) => {
     try {
         const config = req.body;
@@ -161,6 +193,33 @@ app.post('/api/stop', async (req, res) => {
     }
 });
 
+// History API
+const HISTORY_FILE = path.join(__dirname, 'db', 'history.jsonl');
+
+// History API — SQLite por Perfil
+app.get('/api/history/profiles', (req, res) => {
+    try { res.json({ profiles: historyDb.getProfiles() }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/history', (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const profile = req.query.profile || null;
+        res.json(historyDb.getHistory({ profile, page, limit }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/history/:username', (req, res) => {
+    try {
+        const { username } = req.params;
+        const profile = req.query.profile || 'default';
+        historyDb.removeInteraction(username, profile);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Google Maps Bot
 const googleMapsBot = require('./bot/google_maps');
 
@@ -171,14 +230,51 @@ app.post('/api/google-maps/start', async (req, res) => {
 
         // Run asynchronously
         googleMapsBot.start(config, broadcastLog, (data) => {
-            // Send extracted data to frontend
-            io.emit('maps-data', data);
+            // Persist to SQLite
+            const lead = { ...data, query: config.query };
+            mapsDb.saveLead(lead);
+            // Send to frontend in realtime
+            io.emit('maps-data', lead);
         });
 
         res.json({ status: 'started' });
     } catch (error) {
         broadcastLog('Error starting Maps Bot: ' + error.message, 'error');
         res.status(500).json({ error: error.message });
+    }
+});
+
+// -- Google Maps Leads DB API --
+
+// Listar leads com paginação e filtro por busca
+app.get('/api/maps/leads', (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const query = req.query.query || '';
+        res.json(mapsDb.getLeads({ page, limit, query }));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Deletar lead específico por id
+app.delete('/api/maps/leads/:id', (req, res) => {
+    try {
+        const ok = mapsDb.deleteLead(parseInt(req.params.id));
+        res.json({ success: ok });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Limpar todos os leads (ou por query)
+app.delete('/api/maps/leads', (req, res) => {
+    try {
+        mapsDb.clearLeads(req.query.query || null);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 

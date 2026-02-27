@@ -122,15 +122,6 @@ const analyzeProfile = async (page, username, keywords, logCallback) => {
 
     logCallback(`Bio Text Extracted: "${bioStub.substring(0, 50)}..."`);
 
-    // Screenshot for debugging
-    try {
-        await page.screenshot({ path: `debug_profile_${username}.png` });
-    } catch (e) { }
-
-    // If no keywords provided, AUTO-APPROVE
-    // In fact, user requested to REMOVE filtering entirely.
-    // So we just log the bio and return true always.
-
     logCallback('Profile filtering DISABLED. Approving everyone.', 'success');
     return true;
 };

@@ -7,6 +7,7 @@ import GoogleMapsPanel from './components/GoogleMapsPanel';
 import GoogleMapsResults from './components/GoogleMapsResults';
 import WhatsAppSender from './components/WhatsAppSender';
 import SocialMediaPanel from './components/SocialMediaPanel';
+import HistoryPanel from './components/HistoryPanel';
 import { Activity, Radio, Cpu, Settings, Terminal, ShieldCheck, Smartphone } from 'lucide-react';
 
 const socket = io('http://localhost:3000');
@@ -135,12 +136,12 @@ function App() {
       {/* Background Ambience */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
         <div className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-emerald-500/10' :
-            activeTab === 'socialmedia' ? 'bg-purple-500/10' :
-              'bg-red-500/10'
+          activeTab === 'socialmedia' ? 'bg-purple-500/10' :
+            'bg-red-500/10'
           }`} />
         <div className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-blue-500/10' :
-            activeTab === 'socialmedia' ? 'bg-pink-500/10' :
-              'bg-orange-500/10'
+          activeTab === 'socialmedia' ? 'bg-pink-500/10' :
+            'bg-orange-500/10'
           }`} style={{ animationDelay: '-3s' }} />
       </div>
 
@@ -156,9 +157,9 @@ function App() {
               <h1 className="text-2xl font-bold text-white tracking-tight">System Ecosystem</h1>
               <p className="text-slate-400 text-sm flex items-center gap-2">
                 <ShieldCheck className={`w-3 h-3 ${activeTab === 'instagram' ? 'text-emerald-500' :
-                    activeTab === 'maps' ? 'text-red-500' :
-                      activeTab === 'socialmedia' ? 'text-purple-400' :
-                        'text-green-500'
+                  activeTab === 'maps' ? 'text-red-500' :
+                    activeTab === 'socialmedia' ? 'text-purple-400' :
+                      'text-green-500'
                   }`} />
                 {activeTab === 'instagram' ? 'Instagram Prospector' :
                   activeTab === 'maps' ? 'Google Maps Extractor' :
@@ -226,8 +227,9 @@ function App() {
           {/* INSTAGRAM LAYOUT */}
           {activeTab === 'instagram' ? (
             <>
-              <div className="lg:col-span-5 flex flex-col">
-                <div className="glass-panel rounded-2xl p-6 flex-1 flex flex-col">
+              <div className="lg:col-span-5 flex flex-col gap-6">
+                {/* CONFIGURATION PANEL */}
+                <div className="glass-panel rounded-2xl p-6 flex flex-col max-h-[60%]">
                   <div className="flex items-center gap-2 text-slate-300 mb-6 pb-4 border-b border-white/5">
                     <Settings className="w-5 h-5 text-emerald-400" />
                     <h2 className="font-semibold text-lg">Configuration</h2>
@@ -235,6 +237,11 @@ function App() {
                   <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                     <ConfigForm onStart={handleStart} isRunning={isRunning} />
                   </div>
+                </div>
+
+                {/* HISTORY PANEL */}
+                <div className="flex-1 flex flex-col min-h-[30%]">
+                  <HistoryPanel />
                 </div>
               </div>
 

@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const MessageQueue = require('./queue');
 const fs = require('fs');
 const path = require('path');
@@ -76,8 +75,7 @@ class WhatsAppService {
 
     initialize() {
         this.client.on('qr', (qr) => {
-            console.log('QR RECEIVED for session:', this.currentSession);
-            qrcode.generate(qr, { small: true });
+            console.log('QR recebido para sessão:', this.currentSession);
             this.io.emit('wa-qr', qr);
         });
 

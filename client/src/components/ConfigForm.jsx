@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Hash, User, MessageCircle, Send, PlayCircle } from 'lucide-react';
+import { Hash, User, MessageCircle, Send, PlayCircle, Users } from 'lucide-react';
+import AudioRecorderSlot from './AudioRecorderSlot';
 
 const ConfigForm = ({ onStart, isRunning }) => {
     const [config, setConfig] = useState({
@@ -8,16 +9,50 @@ const ConfigForm = ({ onStart, isRunning }) => {
         dmTemplate: 'Hi {name}, love your content! Are you interested in...',
         commentTemplate: 'Awesome! 🔥, Great content! 👏',
         delayMin: 5,
-        delayMax: 15
+        delayMax: 15,
+        targetListEnabled: false,
+        targetList: ''
     });
 
     const handleChange = (e) => {
         setConfig({ ...config, [e.target.name]: e.target.value });
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        onStart({ ...config, profile: selectedProfile });
+
+        let finalAudios = [];
+        if (config.audios && config.audios.length > 0) {
+            setIsLoggingIn(true); // Reusing this loading state for the button
+            try {
+                // Upload each audio to the server
+                for (const aud of config.audios) {
+                    if (aud.file) {
+                        const formData = new FormData();
+                        formData.append('audio', aud.file, `${aud.id}.webm`);
+                        formData.append('id', aud.id);
+
+                        const res = await fetch('http://localhost:3000/api/bot/upload-audio', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            finalAudios.push({ id: aud.id, path: data.path });
+                        } else {
+                            throw new Error(data.error || 'Failed to upload audio');
+                        }
+                    }
+                }
+            } catch (err) {
+                alert('Erro ao fazer upload dos áudios: ' + err.message);
+                setIsLoggingIn(false);
+                return;
+            }
+            setIsLoggingIn(false);
+        }
+
+        onStart({ ...config, profile: selectedProfile, audios: finalAudios });
     };
 
     const [profiles, setProfiles] = useState([]);
@@ -120,6 +155,28 @@ const ConfigForm = ({ onStart, isRunning }) => {
                 )}
             </div>
 
+            {/* IGNORE HISTORY TOGGLE */}
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-amber-500/20">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <label className="text-sm font-medium text-amber-400 flex items-center gap-2 cursor-pointer">
+                            <span className="text-lg">⚡</span> Ignorar Histórico (Retargeting)
+                        </label>
+                        <p className="text-xs text-slate-500 mt-1">
+                            Envia para todos, mesmo quem já recebeu mensagem antes.
+                        </p>
+                    </div>
+                    <input
+                        type="checkbox"
+                        name="ignoreHistory"
+                        checked={config.ignoreHistory || false}
+                        onChange={(e) => setConfig({ ...config, ignoreHistory: e.target.checked })}
+                        className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
+                        disabled={isRunning}
+                    />
+                </div>
+            </div>
+
             {/* ROTATION SETTINGS */}
             <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -173,39 +230,74 @@ const ConfigForm = ({ onStart, isRunning }) => {
                 </p>
             </div>
 */}
-            <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
-                            <Hash className="w-4 h-4 text-emerald-500" /> Hashtags (Busca)
-                        </label>
-                        <input
-                            type="text"
-                            name="hashtags"
-                            value={config.hashtags || ''}
-                            onChange={handleChange}
-                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600"
-                            placeholder="#marketing, #vendas"
-                            disabled={isRunning}
-                        />
-                    </div>
-                    <div>
-                        <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
-                            <User className="w-4 h-4 text-blue-500" /> Palavras-Chave (Filtro)
-                        </label>
-                        <input
-                            type="text"
-                            name="interestKeywords"
-                            value={config.interestKeywords || ''}
-                            onChange={handleChange}
-                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
-                            placeholder="loja, promoção, moda"
-                            disabled={isRunning}
-                        />
-                    </div>
+
+            {/* TARGET LIST MODE */}
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
+                        <Users className="w-4 h-4 text-cyan-400" /> Disparo por Lista (Alvos Específicos)
+                    </label>
+                    <input
+                        type="checkbox"
+                        name="targetListEnabled"
+                        checked={config.targetListEnabled || false}
+                        onChange={(e) => setConfig({ ...config, targetListEnabled: e.target.checked })}
+                        className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"
+                        disabled={isRunning}
+                    />
                 </div>
-                <p className="text-xs text-slate-500 mt-1 ml-1">Hashtags: Onde o bot vai procurar. Palavras-Chave: O que o bot vai ler (Bios/Reels) para aprovar.</p>
+
+                {config.targetListEnabled && (
+                    <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                        <p className="text-xs text-slate-500">Cole os @usernames abaixo (um por linha ou separados por vírgula):</p>
+                        <textarea
+                            name="targetList"
+                            value={config.targetList || ''}
+                            onChange={handleChange}
+                            rows={4}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all placeholder:text-slate-600 custom-scrollbar resize-none"
+                            placeholder="@neymarjr&#10;@cristiano&#10;messi"
+                            disabled={isRunning}
+                        />
+                    </div>
+                )}
             </div>
+
+            {!config.targetListEnabled && (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
+                                <Hash className="w-4 h-4 text-emerald-500" /> Hashtags (Busca)
+                            </label>
+                            <input
+                                type="text"
+                                name="hashtags"
+                                value={config.hashtags || ''}
+                                onChange={handleChange}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600"
+                                placeholder="#marketing, #vendas"
+                                disabled={isRunning}
+                            />
+                        </div>
+                        <div>
+                            <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
+                                <User className="w-4 h-4 text-blue-500" /> Palavras-Chave (Filtro)
+                            </label>
+                            <input
+                                type="text"
+                                name="interestKeywords"
+                                value={config.interestKeywords || ''}
+                                onChange={handleChange}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600"
+                                placeholder="loja, promoção, moda"
+                                disabled={isRunning}
+                            />
+                        </div>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 ml-1">Hashtags: Onde o bot vai procurar. Palavras-Chave: O que o bot vai ler (Bios/Reels) para aprovar.</p>
+                </div>
+            )}
 
             <div className="space-y-4 pt-4 border-t border-white/5">
                 <div>
@@ -234,10 +326,39 @@ const ConfigForm = ({ onStart, isRunning }) => {
                         onChange={handleChange}
                         rows={4}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder:text-slate-600 resize-none"
-                        placeholder="Olá! ;;; Tudo bem? | Oi! ;;; Vi seu perfil! (Use ';;;' para enviar 2 msgs seguidas)"
+                        placeholder="Olá! ;;; Tudo bem? | Oi! ;;; Vi seu perfil! (Use ';;;' para enviar 2 msgs seguidas e @audio1 para enviar áudio)"
                         disabled={isRunning}
                     />
-                    <p className="text-xs text-slate-500 mt-1 ml-1">Vazio = Desativado. '|' = Variação. ';;;' = Mensagens em sequência.</p>
+                    <p className="text-xs text-slate-500 mt-1 ml-1">Vazio = Desativado. '|' = Variação. ';;;' = Sequência. '@audio1' = Áudio Gravado.</p>
+                </div>
+
+                {/* ── ÁUDIOS (GRAVADOR) ────────────────────────────────────── */}
+                <div className="pt-4 border-t border-white/5 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-slate-400 text-sm font-medium">
+                            <span className="text-red-500 text-lg">🎤</span> Áudios (Voice Notes)
+                        </label>
+                        <button type="button" onClick={() => setConfig(c => ({ ...c, audios: [...(c.audios || []), { id: `@audio${(c.audios?.length || 0) + 1}`, url: null, file: null }] }))}
+                            className="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 transition-colors">
+                            + Adicionar Áudio
+                        </button>
+                    </div>
+                    {config.audios?.length > 0 && (
+                        <div className="space-y-3">
+                            {config.audios.map((aud, index) => (
+                                <AudioRecorderSlot
+                                    key={index}
+                                    audio={aud}
+                                    onUpdate={(data) => {
+                                        const newAudios = [...config.audios];
+                                        newAudios[index] = { ...newAudios[index], ...data };
+                                        setConfig(c => ({ ...c, audios: newAudios }));
+                                    }}
+                                    onRemove={() => setConfig(c => ({ ...c, audios: c.audios.filter((_, i) => i !== index) }))}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 

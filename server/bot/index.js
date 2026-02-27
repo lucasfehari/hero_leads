@@ -5,7 +5,7 @@ const { login } = require('./login');
 const { randomDelay, smartClick, autoScroll, humanMove } = require('./utils');
 const { searchByHashtag, analyzeProfile, browseProfile, exploreReels } = require('./strategies');
 const { followUser, likePost, commentPost, sendDM } = require('./actions');
-const { hasInteracted, recordInteraction } = require('./history');
+const { hasInteracted, recordInteraction } = require('./history_db');
 
 puppeteer.use(StealthPlugin());
 
@@ -52,7 +52,9 @@ class BotEngine {
                     '--disable-setuid-sandbox',
                     '--disable-infobars',
                     '--window-size=1280,800',
-                    '--disable-blink-features=AutomationControlled'
+                    '--disable-blink-features=AutomationControlled',
+                    '--use-fake-ui-for-media-stream',
+                    '--use-fake-device-for-media-stream'
                 ]
             });
 
@@ -71,6 +73,16 @@ class BotEngine {
             this.log('Authentication confirmed. Starting logic engine.');
 
             // Parse configuration
+            // 3. Target List (Specific Usernames)
+            let customList = [];
+            if (this.config.targetListEnabled && this.config.targetList) {
+                // Split by newline or comma, remove '@' and spaces
+                customList = this.config.targetList
+                    .split(/[\n,]+/)
+                    .map(u => u.trim().replace('@', ''))
+                    .filter(u => u);
+            }
+
             // 1. Hashtags (Where to search)
             const hashtags = this.config.hashtags
                 ? this.config.hashtags.split(/[, \n]+/).map(k => k.trim().replace('#', '')).filter(k => k)
@@ -82,10 +94,13 @@ class BotEngine {
                 ? this.config.interestKeywords.split(/[, \n]+/).map(k => k.trim()).filter(k => k)
                 : hashtags; // Fallback to hashtags if no specific keywords set
 
-            if (hashtags.length === 0 && !this.config.onlyReels) {
-                this.log('No hashtags provided. Cannot start search loop.', 'warning');
+            if (customList.length > 0) {
+                this.log(`Target List Enabled: ${customList.length} users loaded.`);
+                await this.runLoop([], [], customList);
+            } else if (hashtags.length === 0 && !this.config.onlyReels) {
+                this.log('No targets or hashtags provided. Cannot start search loop.', 'warning');
             } else {
-                await this.runLoop(hashtags, interestKeywords);
+                await this.runLoop(hashtags, interestKeywords, []);
             }
 
         } catch (error) {
@@ -98,13 +113,37 @@ class BotEngine {
     /**
      * Main Automation Loop
      */
-    async runLoop(keywords) {
-        this.strategyState = 'hashtags'; // 'hashtags', 'reels'
+    async runLoop(keywords, interestKeywords, customList = []) {
+        this.strategyState = 'hashtags'; // 'hashtags', 'reels', 'custom_list'
         const seenHashtagPosts = new Set(); // Session memory for hashtags
+
+        let customListIndex = 0;
 
         while (this.isRunning) {
             try {
-                if (keywords.length > 0 || this.config.onlyReels) {
+                if (customList.length > 0) {
+                    this.strategyState = 'custom_list';
+                    this.log(`Strategy: Target List Mode 🎯`);
+
+                    if (customListIndex >= customList.length) {
+                        this.log('Finished processing all users in the Target List.', 'success');
+                        await this.stop();
+                        break;
+                    }
+
+                    const targetUser = customList[customListIndex];
+                    this.log(`[${customListIndex + 1}/${customList.length}] Targeting: @${targetUser}`);
+
+                    // We can reuse processPost by creating a fake post URL pointing to their profile
+                    // processPost is smart enough to detect it's a URL to a profile directly
+                    const fakePostUrl = `https://www.instagram.com/${targetUser}/`;
+                    await this.processPost(fakePostUrl);
+
+                    customListIndex++;
+
+                    // Human pause between actions
+                    await this.humanPause('action_gap');
+                } else if (keywords.length > 0 || this.config.onlyReels) {
                     // STRATEGY SWITCHER
                     // If "Only Reels" is ON, force Reels.
                     // Else: 70% chance Hashtags, 30% chance Reels (or alternate)
@@ -153,16 +192,21 @@ class BotEngine {
                     this.log('No keywords provided. Waiting...');
                     await randomDelay(5000, 10000);
                 }
-                // Cycle Cool-down
-                this.log(`Finished current strategy cycle. Cooling down...`);
-                await randomDelay(30000, 60000);
+
+                if (this.strategyState !== 'custom_list') {
+                    // Cycle Cool-down
+                    this.log(`Finished current strategy cycle. Cooling down...`);
+                    await randomDelay(30000, 60000);
+                }
             } catch (e) {
                 this.log(`Error during strategy execution: ${e.message}`, 'error');
                 this.stats.errors++;
             }
 
-            this.log('All keywords processed. Engine sleeping for 10 minutes...');
-            await randomDelay(600000, 600000);
+            if (this.strategyState !== 'custom_list') {
+                this.log('All keywords processed. Engine sleeping for 10 minutes...');
+                await randomDelay(600000, 600000);
+            }
         }
     }
 
@@ -197,7 +241,7 @@ class BotEngine {
             }
 
             // PERSISTENCE CHECK: Have we met before?
-            if (hasInteracted(username)) {
+            if (!this.config.ignoreHistory && hasInteracted(username, this.config.profile || 'default')) {
                 this.log(`Skipping @${username} (Already interacted in history).`, 'warning');
                 return;
             }
@@ -419,7 +463,7 @@ class BotEngine {
 
             let allSent = true;
             for (const msg of messagesToSend) {
-                const sent = await sendDM(this.page, username, msg);
+                const sent = await sendDM(this.page, username, msg, this.config.audios);
                 if (!sent) {
                     allSent = false;
                     break;
@@ -437,7 +481,7 @@ class BotEngine {
         }
 
         // Record the interaction in DB to never visit again
-        recordInteraction(username, ['processed']);
+        recordInteraction(username, ['processed'], this.config.profile || 'default');
         this.stats.profilesActioned++;
 
         // ROTATION CHECK

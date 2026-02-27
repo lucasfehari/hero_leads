@@ -62,4 +62,10 @@ const recordInteraction = (username, actions = []) => {
     }
 };
 
-module.exports = { hasInteracted, recordInteraction };
+// Remove from in-memory Set — chamado quando o usuário é deletado via API
+const removeInteraction = (username) => {
+    if (!username) return;
+    visitedUsers.delete(username.toLowerCase());
+};
+
+module.exports = { hasInteracted, recordInteraction, removeInteraction };
