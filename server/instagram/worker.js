@@ -145,8 +145,7 @@ async function publishPost(post) {
         });
 
         if (!newPostEl || !newPostEl.asElement()) {
-            await page.screenshot({ path: '/tmp/ig_worker_debug_newpost.png' }).catch(() => { });
-            return fail(post, log, 'Could not find "New Post" button — check debug screenshot.');
+            return fail(post, log, 'Could not find "New Post" button. Verify that Instagram is in the expected language.');
         }
         await humanMove(page);
         await newPostEl.click();
@@ -244,16 +243,14 @@ async function publishPost(post) {
                     });
                     const inp2 = await page.$('input[type="file"]');
                     if (!inp2) {
-                        await page.screenshot({ path: '/tmp/ig_worker_debug_upload.png' }).catch(() => { });
-                        return fail(post, log, 'File input not found after button click — check debug screenshot.');
+                        return fail(post, log, 'File input not found after button click.');
                     }
                     await inp2.uploadFile(...mediaFiles.map(f => f.path));
                     log(`${mediaFiles.length} file(s) uploaded via exposed input.`);
                     await randomDelay(3000, 5000);
                 }
             } else {
-                await page.screenshot({ path: '/tmp/ig_worker_debug_upload.png' }).catch(() => { });
-                return fail(post, log, 'Upload dialog not found — check debug screenshot at /tmp/ig_worker_debug_upload.png');
+                return fail(post, log, 'Upload dialog not found. Try again.');
             }
         } else {
             // Direct uploadFile into exposed input
@@ -263,9 +260,78 @@ async function publishPost(post) {
             await randomDelay(3000, 5000);
         }
 
+        // ── Step 3b: Set crop to "Original" ─────────────────────────────────
+        // After upload Instagram defaults to 1:1 crop (zoomed). We must:
+        //  1. Click the "Selecionar corte" (crop selector) icon
+        //  2. Wait for the crop options panel
+        //  3. Click the "Original" option (photo outline icon)
+        log('Setting crop to Original...');
+        await randomDelay(1500, 2500);
+
+        const cropIconClicked = await page.evaluate(() => {
+            // The crop icon SVG has aria-label "Selecionar corte" (PT) or "Select crop" (EN)
+            const CROP_LABELS = ['Selecionar corte', 'Select crop', 'Seleccionar recorte',
+                'Sélectionner le recadrage', 'Ritaglia', 'Zuschneiden'];
+            for (const label of CROP_LABELS) {
+                const el = document.querySelector(`svg[aria-label="${label}"], button[aria-label="${label}"]`);
+                if (el) {
+                    const btn = el.closest('button') || el.closest('div[role="button"]') || el.parentElement;
+                    if (btn) { btn.click(); return true; }
+                }
+            }
+            return false;
+        });
+
+        if (cropIconClicked) {
+            log('Crop panel opened.');
+            await randomDelay(800, 1200);
+
+            // Click the "Original" option — it has the photo-outline icon or an "Original" label
+            const originalClicked = await page.evaluate(() => {
+                const ORIG_LABELS = ['Ícone de contorno de foto', 'Photo outline icon',
+                    'Ícono de esquema de foto', 'Icône contour photo', 'Original'];
+                // Try aria-label on the SVG or its button wrapper
+                for (const label of ORIG_LABELS) {
+                    const el = document.querySelector(`svg[aria-label="${label}"], button[aria-label="${label}"]`);
+                    if (el) {
+                        const btn = el.closest('button') || el.closest('div[role="button"]') || el.parentElement;
+                        if (btn) { btn.click(); return label; }
+                    }
+                }
+                // Fallback: any span/div whose text is exactly "Original"
+                const spans = Array.from(document.querySelectorAll('span, div, button'));
+                const orig = spans.find(el => el.textContent.trim().toLowerCase() === 'original');
+                if (orig) { orig.click(); return 'text:original'; }
+                return null;
+            });
+
+            if (originalClicked) {
+                log(`Original crop selected (matched: ${originalClicked}).`);
+            } else {
+                log('Could not click "Original" crop option — proceeding with default.', 'warning');
+            }
+            await randomDelay(800, 1200);
+
+            // Close the crop panel by clicking the crop icon again (it toggles)
+            await page.evaluate(() => {
+                const CROP_LABELS = ['Selecionar corte', 'Select crop', 'Seleccionar recorte',
+                    'Sélectionner le recadrage', 'Ritaglia', 'Zuschneiden'];
+                for (const label of CROP_LABELS) {
+                    const el = document.querySelector(`svg[aria-label="${label}"], button[aria-label="${label}"]`);
+                    if (el) {
+                        const btn = el.closest('button') || el.closest('div[role="button"]') || el.parentElement;
+                        if (btn) { btn.click(); return; }
+                    }
+                }
+            });
+            await randomDelay(500, 800);
+        } else {
+            log('Crop icon not found — skipping crop step.', 'info');
+        }
 
         // ── Step 4: Navigate through modal steps (Crop → Filter → Caption) ──
         log('Proceeding through modal steps (Crop → Filter → Caption)...');
+
 
         // Find-and-click atomically INSIDE the active dialog only.
         // Scoping to dialog prevents accidentally clicking buttons on the background page
@@ -334,9 +400,7 @@ async function publishPost(post) {
         log('Entering caption...');
         const fullCaption = buildCaption(post.caption, post.hashtags);
 
-        // Screenshot BEFORE caption so we can see what screen we're on
-        await page.screenshot({ path: '/tmp/ig_worker_debug_precaption.png' }).catch(() => { });
-        log('Pre-caption screenshot saved to /tmp/ig_worker_debug_precaption.png');
+
 
         // Retry up to 4 times with increasing wait — the caption screen may take
         // a moment to render after the last "Next" transition.
@@ -378,27 +442,77 @@ async function publishPost(post) {
 
         if (captionClicked && fullCaption.length > 0) {
             await randomDelay(400, 800);
-            await page.keyboard.type(fullCaption, { delay: 80 });
-            log(`Caption typed (${fullCaption.length} chars).`);
+
+            // Instagram's caption box is a React-managed contenteditable.
+            // page.keyboard.type() sends keydown/keyup events but does NOT trigger React's
+            // synthetic onChange, so the text appears on screen but React's state is empty → caption lost on submit.
+            // Fix: use document.execCommand('insertText') which fires InputEvent that React listens to.
+            const captionInserted = await page.evaluate((text) => {
+                const dialog = document.querySelector('div[role="dialog"]');
+                const scope = dialog || document;
+
+                // Find the caption contenteditable
+                let box = null;
+                const labels = [
+                    'Write a caption…', 'Write a caption...', 'Escreva uma legenda…',
+                    'Escreva uma legenda...', 'Escribe un pie de foto…',
+                ];
+                for (const label of labels) {
+                    box = scope.querySelector(`[aria-label="${label}"]`);
+                    if (box) break;
+                }
+                if (!box) box = scope.querySelector('[contenteditable="true"]');
+                if (!box) return false;
+
+                box.focus();
+                // Clear any existing content first
+                document.execCommand('selectAll', false, null);
+                document.execCommand('delete', false, null);
+                // Insert the full caption — this fires InputEvent and React updates its state
+                return document.execCommand('insertText', false, text);
+            }, fullCaption);
+
+            if (captionInserted) {
+                log(`Caption inserted via execCommand (${fullCaption.length} chars).`);
+            } else {
+                // Fallback: use clipboard paste (also triggers React's events)
+                log('execCommand failed — trying clipboard paste fallback...', 'info');
+                await page.evaluate((text) => {
+                    // Write to clipboard then paste
+                    return navigator.clipboard.writeText(text).catch(() => {
+                        // navigator.clipboard not available — use input event simulation
+                        const dialog = document.querySelector('div[role="dialog"]');
+                        const box = dialog ? dialog.querySelector('[contenteditable="true"]') : null;
+                        if (!box) return;
+                        box.focus();
+                        // Dispatch a paste event with the caption as data
+                        const dt = new DataTransfer();
+                        dt.setData('text/plain', text);
+                        box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+                    });
+                }, fullCaption);
+                // After writing to clipboard, send Ctrl+V
+                await page.keyboard.down('Control');
+                await page.keyboard.press('v');
+                await page.keyboard.up('Control');
+                log(`Caption pasted via clipboard (${fullCaption.length} chars).`);
+            }
+
             await randomDelay(1000, 1800);
         } else if (!captionClicked) {
             log('Caption box not found after retries — check /tmp/ig_worker_debug_precaption.png', 'warning');
         }
+
         await randomDelay(1000, 1500);
 
 
         // ── Step 6: Click Share/Publish ──────────────────────────────────────
-        // Screenshot BEFORE share so we can see the caption screen state
-        await page.screenshot({ path: '/tmp/ig_worker_debug_caption.png' }).catch(() => { });
-        log('Clicking Publish in modal header... (screenshot: /tmp/ig_worker_debug_caption.png)');
+        log('Clicking Publish...');
         const shared = await clickPublish();
         if (!shared) {
-            return fail(post, log, 'Could not find "Share" button — see /tmp/ig_worker_debug_caption.png');
+            return fail(post, log, 'Could not find "Share" button.');
         }
         await randomDelay(1500, 2500);
-        // Screenshot AFTER share to see confirmation / error
-        await page.screenshot({ path: '/tmp/ig_worker_debug_after_share.png' }).catch(() => { });
-        log('Post-share screenshot saved to /tmp/ig_worker_debug_after_share.png');
 
         // ── Step 7: Observe publication success ──────────────────────────────
         log('Waiting for publication confirmation...');
@@ -409,8 +523,7 @@ async function publishPost(post) {
             db.prepare("UPDATE ig_posts SET status = 'published', published_at = datetime('now'), error_msg = NULL WHERE id = ?").run(post.id);
             if (io) io.emit('ig-post-status', { id: post.id, status: 'published' });
         } else {
-            await page.screenshot({ path: '/tmp/ig_worker_debug_timeout.png' }).catch(() => { });
-            return fail(post, log, 'Publication timed out — see /tmp/ig_worker_debug_timeout.png for current screen state');
+            return fail(post, log, 'Publication timed out. Check Instagram manually.');
         }
 
 

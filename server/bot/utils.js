@@ -5,15 +5,55 @@ const randomDelay = (min, max) => {
 };
 
 const humanType = async (page, text) => {
-    // Type with random delays between keystrokes (50ms - 200ms)
-    // Occasional long pauses (simulating thinking)
-    for (const char of text) {
-        await page.keyboard.type(char, { delay: randomDelay(40, 120) });
-        if (Math.random() < 0.05) { // 5% chance of a "thinking" pause
-            await randomDelay(400, 800);
+    // Instagram's chat input is a React-managed contenteditable div.
+    // page.keyboard.type() dispatches keydown/keyup but React's synthetic event
+    // system does NOT listen to those — it listens to InputEvent.
+    // Solution: use document.execCommand('insertText') which fires the correct
+    // InputEvent that React intercepts and updates state with.
+
+    const inserted = await page.evaluate((t) => {
+        const el = document.activeElement;
+        if (!el) return false;
+
+        // Clear existing content first
+        el.focus();
+
+        // Primary: execCommand (triggers React InputEvent)
+        if (document.execCommand('selectAll', false, null)) {
+            document.execCommand('delete', false, null);
+        }
+        const ok = document.execCommand('insertText', false, t);
+        if (ok) return true;
+
+        // Fallback: dispatch a paste-style InputEvent manually
+        const ev = new InputEvent('input', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: t,
+        });
+        el.dispatchEvent(ev);
+        return false;
+    }, text);
+
+    if (!inserted) {
+        // Last resort: clipboard paste via Puppeteer CDPSession
+        console.log('[TYPE] execCommand failed, trying clipboard paste...');
+        try {
+            // Write to clipboard via CDP
+            const client = await page.createCDPSession();
+            await client.send('Input.insertText', { text });
+            await client.detach();
+        } catch (e) {
+            // Ultra fallback: type character by character
+            console.log('[TYPE] CDP insertText failed, falling back to keyboard.type()');
+            for (const char of text) {
+                await page.keyboard.type(char, { delay: 50 + Math.random() * 80 });
+            }
         }
     }
 };
+
 
 /*
  * Human Scroll
