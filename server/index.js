@@ -51,12 +51,13 @@ const broadcastLog = (message, type = 'info') => {
 // Profile Management — SQLite-backed session store
 app.get('/api/profiles', (req, res) => {
     try {
-        const profiles = sessionsDb.listSessions().map(r => r.name);
+        const profiles = sessionsDb.listSessions(); // [{name, updated_at}]
         res.json({ profiles });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
+
 
 app.post('/api/profiles/active', (req, res) => {
     const { profile } = req.body;
