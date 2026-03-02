@@ -12,7 +12,22 @@ dist
 dist-ssr
 *.local
 profile_data
+profiles
 whatsapp_sessions
+
+# Instagram bot — dados sensíveis e arquivos grandes
+profiles_data/
+server/uploads/
+server/db/*.db
+server/db/*.db-journal
+
+# Screenshots / prints
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+
 
 # Editor directories and files
 .vscode/*

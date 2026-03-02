@@ -58,6 +58,10 @@ class BotEngine {
                 ]
             });
 
+            // Force allow microphone permissions to prevent Chrome blocking popups
+            const context = this.browser.defaultBrowserContext();
+            await context.overridePermissions('https://www.instagram.com', ['microphone']);
+
             this.page = (await this.browser.pages())[0];
             await this.page.setViewport({ width: 1280, height: 800 });
 
