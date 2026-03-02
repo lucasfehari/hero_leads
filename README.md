@@ -1,156 +1,131 @@
-# 🤖 Marketing Automation System
+# Browze Bot — Automation Suite
 
-Plataforma web completa para automação de marketing digital: **disparo em massa de WhatsApp**, **automação de Instagram** e **extração de leads via Google Maps** — tudo com painel de controle visual em tempo real.
-
----
-
-## ✨ Funcionalidades
-
-### 📱 Disparos WhatsApp
-- Envio em massa com múltiplas mensagens por contato
-- **Sistema Anti-Ban de 7 camadas:**
-  - Delays gaussianos (distribuição bell-curve, simula digitação humana)
-  - Warmup automático de conta (começa em 20 msgs/dia → 280/dia ao longo de 9 semanas)
-  - Simulação de atividade humana entre envios
-  - Validação de números antes do envio
-  - Humanização de mensagens (spintax, Unicode invisível, emojis aleatórios)
-  - Rate limiter inteligente (limite por hora e por dia)
-  - Embaralhamento de contatos para evitar padrões
-- **Opt-Out automático:** detecta palavras-chave de saída (SAIR, STOP, PARAR, etc.) e remove o contato da lista automaticamente, com resposta configurável
-- **Agendamento de campanhas:** define horário de início e fim, a campanha espera/pausa automaticamente
-- **Múltiplas sessões** (contas WhatsApp) com troca sem reiniciar o servidor
-- Painel de saúde da sessão com barra de warmup e estatísticas em tempo real
-
-### 🤖 Instagram Bot
-- Automação de interações (curtidas, comentários, seguir)
-- Configuração por perfil-alvo
-- Rotação de contas automática
-- Suporte a múltiplos perfis com dados isolados
-
-### 🗺️ Extração Google Maps
-- Busca de leads por categoria/localização
-- Extrai: nome, telefone, website, avaliação
-- Exporta para lista pronta para disparos
-
-### 📊 Painel Web
-- Interface React moderna (Tailwind CSS + glassmorphism)
-- Atualizações em tempo real via WebSocket (Socket.IO)
-- Log de status ao vivo durante campanhas
-- Alertas de opt-out em tempo real (banner vermelho com o número e a mensagem recebida)
+**Browze Bot** é uma plataforma de automação para Instagram, WhatsApp, Google Maps e Social Media, com interface visual moderna.
 
 ---
 
-## 🗂️ Estrutura do Projeto
+## ⚡ Instalação Rápida (Windows)
 
-```
-/
-├── client/                  # Frontend React (Vite)
-│   └── src/
-│       └── components/
-│           ├── WhatsAppSender.jsx     # Painel principal de disparos
-│           ├── WhatsAppDashboard.jsx  # Dashboard WhatsApp
-│           ├── GoogleMapsPanel.jsx    # Extração de leads
-│           ├── ConfigForm.jsx         # Configurações do bot Instagram
-│           └── LogViewer.jsx          # Visualizador de logs
-│
-├── server/                  # Backend Node.js (Express)
-│   ├── index.js             # Servidor principal + rotas API
-│   ├── whatsapp/
-│   │   ├── index.js         # Serviço WhatsApp (sessões, opt-out)
-│   │   ├── queue.js         # Fila de mensagens + agendamento
-│   │   └── anti-ban.js      # Motor anti-ban de 7 camadas
-│   └── bot/                 # Automação Instagram (Puppeteer)
-│
-├── whatsapp_sessions/       # Dados de sessão por conta
-│   └── session-<nome>/
-│       ├── warmup.json      # Histórico de warmup da conta
-│       └── bad_numbers.json # Blacklist de números da conta
-│
-├── INICIAR_SISTEMA.bat      # Inicia server + client juntos
-└── ABRIR_CHROME_ROBO.bat    # Abre Chrome com remote debugging
-```
+### Opção 1 — Duplo clique (mais fácil)
+
+1. Baixe ou clone o projeto
+2. Dê duplo clique em **`INICIAR.bat`**
+3. Na primeira execução: instala tudo automaticamente
+4. Acesse: **http://localhost:5173**
+
+> O `.bat` verifica/instala Node.js, instala as dependências e abre o navegador automaticamente.
 
 ---
 
-## 🚀 Como Usar
-
-### Pré-requisitos
-
-- [Node.js](https://nodejs.org/) v18+
-- Google Chrome instalado
-
-### Instalação
+### Opção 2 — Terminal (recomendado para desenvolvedores)
 
 ```bash
-# 1. Instalar dependências do servidor
-cd server
-npm install
+# 1. Instalar dependências (apenas na primeira vez)
+npm run install:all
 
-# 2. Instalar dependências do cliente
-cd ../client
-npm install
-```
-
-### Iniciar
-
-**Windows (recomendado):** dê duplo clique em `INICIAR_SISTEMA.bat`
-
-**Manualmente:**
-```bash
-# Terminal 1 — Servidor
-cd server
-node index.js
-
-# Terminal 2 — Frontend
-cd client
+# 2. Iniciar servidor + interface juntos
 npm run dev
 ```
 
-Acesse em: **http://localhost:5173**
+Ou separado:
+```bash
+# Backend (porta 3000)
+node server/index.js
+
+# Frontend (porta 5173) — em outro terminal
+cd client && npm run dev
+```
 
 ---
 
-## ⚙️ Configuração
+## 📋 Requisitos do Sistema
 
-### WhatsApp
-1. Abra o painel e clique em **Conectar**
-2. Escaneie o QR Code com o WhatsApp do celular
-3. Aguarde o status mudar para ✅ Conectado
-4. Configure a campanha e clique em **Iniciar Disparos**
+| Requisito | Versão | Download |
+|-----------|--------|---------|
+| **Node.js** | v18+ (v20 recomendado) | [nodejs.org](https://nodejs.org) |
+| **Visual C++ Build Tools** | 2017+ | [Baixar](https://aka.ms/vs/17/release/vs_BuildTools.exe) ¹ |
+| **Windows** | 10 / 11 | — |
+| **Google Chrome** | Qualquer versão | [chrome.google.com](https://www.google.com/chrome/) ² |
 
-### Anti-Ban
-Todos os parâmetros são configuráveis no painel:
-- Limites por hora e por dia
-- Delays mínimo/máximo entre contatos
-- Pool de emojis para humanização
-- Frequência de simulação de atividade
-
-### Opt-Out
-Configure no painel **Opt-Out Automático:**
-- Ativar/desativar detecção
-- Ativar/desativar resposta automática
-- Personalizar o texto da resposta
-- Gerenciar a lista de palavras-chave
-
-### Agendamento
-Configure no painel **Agendamento:**
-- Ativar e definir horário de início e fim
-- A campanha espera ou pausa automaticamente fora da janela
+> ¹ **Obrigatório** para compilar `better-sqlite3`. Selecione "Desenvolvimento para Desktop com C++" durante a instalação.  
+> ² Recomendado para a automação do Instagram. O Puppeteer baixa o Chromium automaticamente, mas o Chrome do sistema é mais confiável.
 
 ---
 
-## 🛠️ Stack
+## 📁 Estrutura do Projeto
 
-| Camada | Tecnologia |
+```
+browze-bot/
+├── INICIAR.bat          ← Inicialização com 1 clique (Windows)
+├── package.json         ← Scripts raiz (npm run dev)
+├── server/              ← Backend Node.js (porta 3000)
+│   ├── index.js         ← Servidor Express + Socket.IO
+│   ├── bot/             ← Lógica de automação Instagram
+│   ├── whatsapp/        ← Módulo WhatsApp
+│   ├── db/              ← Bancos SQLite
+│   └── uploads/         ← Áudios enviados (gitignore)
+└── client/              ← Frontend React + Vite (porta 5173)
+    └── src/
+        ├── App.jsx
+        └── components/
+```
+
+---
+
+## 🔧 Configuração
+
+Copie o arquivo de exemplo e edite:
+
+```bash
+cp server/.env.example server/.env
+```
+
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `PORT` | `3000` | Porta do servidor backend |
+
+---
+
+## 🚀 Módulos
+
+| Módulo | Descrição |
 |--------|-----------|
-| Frontend | React 18, Vite, Tailwind CSS |
-| Backend | Node.js, Express 5, Socket.IO |
-| WhatsApp | whatsapp-web.js |
-| Automação | Puppeteer + Stealth Plugin |
-| Banco de dados | SQLite (better-sqlite3) |
+| **Instagram Bot** | Prospecção automática via hashtags e concorrentes |
+| **WhatsApp Sender** | Envio em massa com múltiplas sessões |
+| **Google Maps Extractor** | Extração de leads de estabelecimentos |
+| **Social Media Scheduler** | Agendamento de posts |
 
 ---
 
-## ⚠️ Aviso Legal
+## ⚠️ Solução de Problemas
 
-Este software é destinado a **uso profissional e responsável** de marketing. O usuário é responsável por garantir que seu uso esteja em conformidade com os Termos de Serviço do WhatsApp e com a legislação local de proteção de dados (LGPD). O projeto inclui sistema de opt-out para respeitar os usuários que não desejam receber mensagens.
+**`better-sqlite3` falha na instalação:**
+```
+Instale o Visual C++ Build Tools:
+https://aka.ms/vs/17/release/vs_BuildTools.exe
+→ Selecione "Desenvolvimento para Desktop com C++"
+→ Reinicie o terminal e execute novamente
+```
+
+**Node.js não reconhecido após instalação:**
+```
+Feche e reabra o terminal (ou reinicie o PC)
+```
+
+**Porta 3000 ou 5173 em uso:**
+```
+Feche outros programas que usam essas portas
+Ou defina PORT=3001 no server/.env
+```
+
+---
+
+## 📦 Tecnologias
+
+- **Backend**: Node.js, Express, Socket.IO, Puppeteer, better-sqlite3
+- **Frontend**: React 19, Vite, Tailwind CSS, Space Grotesk
+- **Automação**: Puppeteer Extra + Stealth Plugin, whatsapp-web.js
+
+---
+
+*Browze Bot © 2025 — Feito com 💚*

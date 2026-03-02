@@ -12,6 +12,7 @@ const igWorker = require('./instagram/worker');
 const { removeInteraction } = require('./bot/history_db');
 const historyDb = require('./bot/history_db');
 const mapsDb = require('./db/maps_db');
+const sessionsDb = require('./db/sessions_db');
 
 const app = express();
 const server = http.createServer(app);
@@ -47,14 +48,11 @@ const broadcastLog = (message, type = 'info') => {
     console.log(`[${type.toUpperCase()}] ${message}`);
 };
 
-// Profile Management
-const PROFILES_DIR = path.join(__dirname, 'profiles');
-if (!fs.existsSync(PROFILES_DIR)) fs.mkdirSync(PROFILES_DIR);
-
+// Profile Management — SQLite-backed session store
 app.get('/api/profiles', (req, res) => {
     try {
-        const files = fs.readdirSync(PROFILES_DIR).filter(f => f.endsWith('.json'));
-        res.json({ profiles: files.map(f => f.replace('.json', '')) });
+        const profiles = sessionsDb.listSessions().map(r => r.name);
+        res.json({ profiles });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -63,17 +61,13 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles/active', (req, res) => {
     const { profile } = req.body;
     if (!profile) return res.status(400).json({ error: 'Profile name required' });
-
-    const source = path.join(PROFILES_DIR, `${profile}.json`);
-    const target = path.join(__dirname, 'cookies.json');
-
-    if (fs.existsSync(source)) {
-        fs.copyFileSync(source, target);
-        console.log(`[System] Switched to profile: ${profile}`);
-        res.json({ success: true, active: profile });
-    } else {
-        res.status(404).json({ error: 'Profile not found' });
-    }
+    const cookies = sessionsDb.loadSession(profile);
+    if (!cookies) return res.status(404).json({ error: 'Profile not found in DB' });
+    // Inform the bot engine which profile to use on next start
+    const { setActiveProfile } = require('./bot/login');
+    setActiveProfile(profile);
+    console.log(`[System] Switched to profile: ${profile}`);
+    res.json({ success: true, active: profile });
 });
 
 app.post('/api/profiles/login', async (req, res) => {
@@ -96,7 +90,6 @@ app.post('/api/profiles/login', async (req, res) => {
 
         const page = await browser.newPage();
 
-        // CLEAR DATA (Cookies/Storage) to ensure clean login
         const client = await page.target().createCDPSession();
         await client.send('Network.clearBrowserCookies');
         await client.send('Network.clearBrowserCache');
@@ -104,28 +97,22 @@ app.post('/api/profiles/login', async (req, res) => {
 
         console.log(`[System] Waiting for user to login to ${name}...`);
 
-        // Wait for 'Home' icon or Timeout
         try {
-            await page.waitForSelector('svg[aria-label="Home"], svg[aria-label="Página inicial"], svg[aria-label="Início"]', { timeout: 300000 }); // 5 mins
+            await page.waitForSelector('svg[aria-label="Home"], svg[aria-label="Página inicial"], svg[aria-label="Início"]', { timeout: 300000 });
         } catch (e) {
             await browser.close();
             return res.status(408).json({ error: 'Login timeout or closed.' });
         }
 
-        // Extract Cookies
         const cookies = await page.cookies();
-
-        // Save to Profile
-        const filePath = path.join(PROFILES_DIR, `${name}.json`);
-        fs.writeFileSync(filePath, JSON.stringify(cookies, null, 2));
-
+        sessionsDb.saveSession(name, cookies);
         await browser.close();
 
-        console.log(`[System] Profile ${name} saved successfully.`);
+        console.log(`[System] Profile ${name} saved to DB.`);
         res.json({ success: true, profile: name });
 
     } catch (e) {
-        console.error("Login Error:", e);
+        console.error('Login Error:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -134,8 +121,17 @@ app.post('/api/profiles', (req, res) => {
     const { name, cookies } = req.body;
     if (!name || !cookies) return res.status(400).json({ error: 'Name and Cookies required' });
     try {
-        const filePath = path.join(PROFILES_DIR, `${name}.json`);
-        fs.writeFileSync(filePath, typeof cookies === 'string' ? cookies : JSON.stringify(cookies, null, 2));
+        const parsed = typeof cookies === 'string' ? JSON.parse(cookies) : cookies;
+        sessionsDb.saveSession(name, parsed);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/profiles/:name', (req, res) => {
+    try {
+        sessionsDb.deleteSession(req.params.name);
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -168,8 +164,39 @@ app.post('/api/bot/upload-audio', uploadBotAudio.single('audio'), (req, res) => 
     res.json({ success: true, path: req.file.path, filename: req.file.filename, slotId });
 });
 
+// Audio library — list all saved audios
+app.get('/api/bot/audios', (req, res) => {
+    try {
+        const files = fs.readdirSync(BOT_AUDIOS_DIR)
+            .filter(f => /\.(webm|mp3|wav|ogg|mp4|m4a)$/i.test(f))
+            .map(f => {
+                const stat = fs.statSync(path.join(BOT_AUDIOS_DIR, f));
+                return { filename: f, path: path.join(BOT_AUDIOS_DIR, f), size: (stat.size / 1024).toFixed(1) + ' KB', createdAt: stat.birthtimeMs };
+            })
+            .sort((a, b) => b.createdAt - a.createdAt);
+        res.json({ audios: files });
+    } catch { res.json({ audios: [] }); }
+});
+
+// Serve individual audio file by filename
+app.get('/api/bot/audios/file/:filename', (req, res) => {
+    const filePath = path.join(BOT_AUDIOS_DIR, path.basename(req.params.filename));
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Not found' });
+    res.sendFile(filePath);
+});
+
+// Delete an audio file from the library
+app.delete('/api/bot/audios/:filename', (req, res) => {
+    try {
+        const filePath = path.join(BOT_AUDIOS_DIR, path.basename(req.params.filename));
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Serve the audios so Puppeteer can fetch them for the fake media stream
 app.use('/api/bot/media', express.static(BOT_AUDIOS_DIR));
+
 
 app.post('/api/start', async (req, res) => {
     try {
@@ -406,6 +433,19 @@ app.delete('/api/whatsapp/sessions/:name', (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+// Rename/label a session
+app.patch('/api/whatsapp/sessions/:name/rename', (req, res) => {
+    try {
+        const { label } = req.body;
+        if (!label) return res.status(400).json({ error: 'Label required' });
+        const result = waClient.renameSession(req.params.name, label);
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 
 // Start a campaign — messages can be string or array
 app.post('/api/whatsapp/start', (req, res) => {
