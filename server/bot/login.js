@@ -1,33 +1,41 @@
-const fs = require('fs');
-const path = require('path');
+const { saveSession, loadSession } = require('../db/sessions_db');
 
-const COOKIES_PATH = path.join(__dirname, '../cookies.json');
+/**
+ * Active profile name — set by the bot engine when starting
+ */
+let activeProfile = 'default';
 
-const saveCookies = async (page) => {
+const setActiveProfile = (name) => { activeProfile = name; };
+const getActiveProfile = () => activeProfile;
+
+const saveCookies = async (page, profileName) => {
+    const name = profileName || activeProfile;
     const cookies = await page.cookies();
-    fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+    saveSession(name, cookies);
+    console.log(`[Login] Session saved to DB: ${name}`);
 };
 
-const loadCookies = async (page) => {
-    if (fs.existsSync(COOKIES_PATH)) {
-        const cookiesString = fs.readFileSync(COOKIES_PATH);
-        const cookies = JSON.parse(cookiesString);
+const loadCookies = async (page, profileName) => {
+    const name = profileName || activeProfile;
+    const cookies = loadSession(name);
+    if (cookies && cookies.length > 0) {
         await page.setCookie(...cookies);
         return true;
     }
     return false;
 };
 
-const login = async (page, logCallback) => {
-    logCallback('Checking for existing session...');
-    const hasCookies = await loadCookies(page);
+const login = async (page, logCallback, profileName) => {
+    const name = profileName || activeProfile;
+    logCallback(`Checking for existing session (profile: ${name})...`);
+    const hasCookies = await loadCookies(page, name);
 
     await page.goto('https://www.instagram.com/', { waitUntil: 'networkidle2' });
 
     if (hasCookies) {
         logCallback('Cookies loaded. Verifying session...');
         try {
-            await page.waitForSelector('svg[aria-label="Home"]', { timeout: 5000 });
+            await page.waitForSelector('svg[aria-label="Home"], svg[aria-label="Página inicial"], svg[aria-label="Início"]', { timeout: 5000 });
             logCallback('Session verified! Logged in.');
             return true;
         } catch (e) {
@@ -37,11 +45,10 @@ const login = async (page, logCallback) => {
 
     logCallback('Manual login required. Please log in within the browser window.', 'warning');
 
-    // Wait for user to log in manually by checking for a specific element that appears after login
     try {
-        await page.waitForSelector('svg[aria-label="Home"]', { timeout: 300000 }); // 5 minutes to login
+        await page.waitForSelector('svg[aria-label="Home"], svg[aria-label="Página inicial"], svg[aria-label="Início"]', { timeout: 300000 });
         logCallback('Login detected!');
-        await saveCookies(page);
+        await saveCookies(page, name);
         return true;
     } catch (e) {
         logCallback('Login timed out.', 'error');
@@ -49,4 +56,4 @@ const login = async (page, logCallback) => {
     }
 };
 
-module.exports = { login, saveCookies };
+module.exports = { login, saveCookies, setActiveProfile, getActiveProfile };

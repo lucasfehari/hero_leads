@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
 import { Hash, User, MessageCircle, Send, PlayCircle, Users } from 'lucide-react';
-import AudioRecorderSlot from './AudioRecorderSlot';
+import DmWorkflowBuilder from './DmWorkflowBuilder';
 
 const ConfigForm = ({ onStart, isRunning }) => {
     const [config, setConfig] = useState({
         keywords: '',
         competitors: '',
-        dmTemplate: 'Hi {name}, love your content! Are you interested in...',
-        commentTemplate: 'Awesome! 🔥, Great content! 👏',
+        commentTemplate: 'Excelente! 🔥, Adorei! 👏',
         delayMin: 5,
         delayMax: 15,
         targetListEnabled: false,
         targetList: ''
     });
+    const [dmSteps, setDmSteps] = useState([]); // [{type:'text'|'audio', text?, audioBlob?, audioUrl?, audioFilename?, audioServerPath?}]
 
     const handleChange = (e) => {
         setConfig({ ...config, [e.target.name]: e.target.value });
@@ -21,38 +21,42 @@ const ConfigForm = ({ onStart, isRunning }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        let finalAudios = [];
-        if (config.audios && config.audios.length > 0) {
-            setIsLoggingIn(true); // Reusing this loading state for the button
-            try {
-                // Upload each audio to the server
-                for (const aud of config.audios) {
-                    if (aud.file) {
-                        const formData = new FormData();
-                        formData.append('audio', aud.file, `${aud.id}.webm`);
-                        formData.append('id', aud.id);
+        // Serialize dmSteps → dmTemplate string (;;;) and upload new audio blobs
+        const finalAudios = [];
+        const parts = [];
+        let audioIdx = 0;
 
-                        const res = await fetch('http://localhost:3000/api/bot/upload-audio', {
-                            method: 'POST',
-                            body: formData
-                        });
+        for (const step of dmSteps) {
+            if (step.type === 'text') {
+                if (step.text?.trim()) parts.push(step.text.trim());
+            } else if (step.type === 'audio') {
+                audioIdx++;
+                const tag = `@audio${audioIdx}`;
+
+                if (step.audioServerPath) {
+                    // Already on server — reuse path directly
+                    finalAudios.push({ id: tag, path: step.audioServerPath });
+                } else if (step.audioBlob) {
+                    // New recording/upload — send to server
+                    const formData = new FormData();
+                    formData.append('audio', step.audioBlob, `${tag}.webm`);
+                    formData.append('id', tag);
+                    try {
+                        const res = await fetch('http://localhost:3000/api/bot/upload-audio', { method: 'POST', body: formData });
                         const data = await res.json();
-                        if (data.success) {
-                            finalAudios.push({ id: aud.id, path: data.path });
-                        } else {
-                            throw new Error(data.error || 'Failed to upload audio');
-                        }
+                        if (data.success) finalAudios.push({ id: tag, path: data.path });
+                        else throw new Error(data.error);
+                    } catch (err) {
+                        alert('Erro ao fazer upload do áudio: ' + err.message);
+                        return;
                     }
                 }
-            } catch (err) {
-                alert('Erro ao fazer upload dos áudios: ' + err.message);
-                setIsLoggingIn(false);
-                return;
+                parts.push(tag);
             }
-            setIsLoggingIn(false);
         }
 
-        onStart({ ...config, profile: selectedProfile, audios: finalAudios });
+        const dmTemplate = parts.join(' ;;; ');
+        onStart({ ...config, profile: selectedProfile, dmTemplate, audios: finalAudios });
     };
 
     const [profiles, setProfiles] = useState([]);
@@ -317,50 +321,17 @@ const ConfigForm = ({ onStart, isRunning }) => {
                 </div>
 
                 <div>
-                    <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
-                        <Send className="w-4 h-4 text-purple-500" /> Mensagem Direct (Spintax & Sequência)
+                    <label className="flex items-center gap-2 text-slate-400 mb-3 text-sm font-medium">
+                        <Send className="w-4 h-4 text-purple-500" /> Mensagem Direct — Sequência de Envio
                     </label>
-                    <textarea
-                        name="dmTemplate"
-                        value={config.dmTemplate || ''}
-                        onChange={handleChange}
-                        rows={4}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder:text-slate-600 resize-none"
-                        placeholder="Olá! ;;; Tudo bem? | Oi! ;;; Vi seu perfil! (Use ';;;' para enviar 2 msgs seguidas e @audio1 para enviar áudio)"
-                        disabled={isRunning}
+                    <DmWorkflowBuilder
+                        steps={dmSteps}
+                        onChange={setDmSteps}
                     />
-                    <p className="text-xs text-slate-500 mt-1 ml-1">Vazio = Desativado. '|' = Variação. ';;;' = Sequência. '@audio1' = Áudio Gravado.</p>
-                </div>
-
-                {/* ── ÁUDIOS (GRAVADOR) ────────────────────────────────────── */}
-                <div className="pt-4 border-t border-white/5 space-y-3">
-                    <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-                            <span className="text-red-500 text-lg">🎤</span> Áudios (Voice Notes)
-                        </label>
-                        <button type="button" onClick={() => setConfig(c => ({ ...c, audios: [...(c.audios || []), { id: `@audio${(c.audios?.length || 0) + 1}`, url: null, file: null }] }))}
-                            className="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 transition-colors">
-                            + Adicionar Áudio
-                        </button>
-                    </div>
-                    {config.audios?.length > 0 && (
-                        <div className="space-y-3">
-                            {config.audios.map((aud, index) => (
-                                <AudioRecorderSlot
-                                    key={index}
-                                    audio={aud}
-                                    onUpdate={(data) => {
-                                        const newAudios = [...config.audios];
-                                        newAudios[index] = { ...newAudios[index], ...data };
-                                        setConfig(c => ({ ...c, audios: newAudios }));
-                                    }}
-                                    onRemove={() => setConfig(c => ({ ...c, audios: c.audios.filter((_, i) => i !== index) }))}
-                                />
-                            ))}
-                        </div>
-                    )}
                 </div>
             </div>
+
+
 
             <div className="pt-6">
                 <button

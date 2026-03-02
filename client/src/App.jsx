@@ -133,89 +133,84 @@ function App() {
   return (
     <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
 
-      {/* Background Ambience */}
+      {/* Background Ambience — brand green glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
-        <div className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-emerald-500/10' :
-          activeTab === 'socialmedia' ? 'bg-purple-500/10' :
-            'bg-red-500/10'
-          }`} />
-        <div className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] animate-float ${activeTab === 'instagram' ? 'bg-blue-500/10' :
-          activeTab === 'socialmedia' ? 'bg-pink-500/10' :
-            'bg-orange-500/10'
-          }`} style={{ animationDelay: '-3s' }} />
+        <div className="absolute top-[-15%] left-[-10%] w-[50%] h-[50%] rounded-full blur-[130px] animate-float"
+          style={{ background: 'radial-gradient(circle, rgba(23,191,96,0.07) 0%, transparent 70%)' }} />
+        <div className="absolute bottom-[-15%] right-[-10%] w-[45%] h-[45%] rounded-full blur-[130px] animate-float"
+          style={{ background: 'radial-gradient(circle, rgba(15,38,32,0.7) 0%, transparent 70%)', animationDelay: '-3s' }} />
+        <div className="absolute top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-[30%] h-[30%] rounded-full blur-[100px]"
+          style={{ background: 'radial-gradient(circle, rgba(23,166,85,0.04) 0%, transparent 70%)' }} />
       </div>
 
       <div className="w-full max-w-7xl space-y-6">
 
-        {/* Header */}
-        <header className="glass-panel rounded-2xl p-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-4">
-            <div className={`p-3 rounded-xl shadow-lg transition-colors ${activeTab === 'instagram' ? 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-emerald-500/20' : 'bg-gradient-to-br from-red-500 to-orange-600 shadow-red-500/20'}`}>
-              <Cpu className="w-8 h-8 text-white" />
+        {/* ── Browze Bot Header ─────────────────────────────────────── */}
+        <header className="glass-panel rounded-2xl px-5 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
+
+          {/* Logo */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Logo mark */}
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center animate-brand-pulse"
+                style={{ background: 'linear-gradient(135deg, #17BF60 0%, #0F2620 100%)' }}>
+                {/* B icon */}
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M5 4h7a4 4 0 0 1 0 8H5V4z" fill="#BCF285" />
+                  <path d="M5 12h8a4 4 0 0 1 0 8H5v-8z" fill="white" fillOpacity="0.9" />
+                </svg>
+              </div>
             </div>
+            {/* Wordmark */}
             <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">System Ecosystem</h1>
-              <p className="text-slate-400 text-sm flex items-center gap-2">
-                <ShieldCheck className={`w-3 h-3 ${activeTab === 'instagram' ? 'text-emerald-500' :
-                  activeTab === 'maps' ? 'text-red-500' :
-                    activeTab === 'socialmedia' ? 'text-purple-400' :
-                      'text-green-500'
-                  }`} />
-                {activeTab === 'instagram' ? 'Instagram Prospector' :
-                  activeTab === 'maps' ? 'Google Maps Extractor' :
-                    activeTab === 'socialmedia' ? 'Social Media Scheduler' :
-                      'WhatsApp Mass Sender'}
+              <h1 className="text-xl font-bold tracking-tight leading-none"
+                style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                <span style={{ color: '#BCF285' }}>Browze</span>
+                <span className="text-white"> Bot</span>
+              </h1>
+              <p className="text-xs font-medium mt-0.5" style={{ color: '#17A655', fontFamily: "'Space Grotesk', sans-serif" }}>
+                Automation Suite
               </p>
             </div>
           </div>
 
-          <div className="flex gap-2 bg-slate-950/50 p-1 rounded-xl">
-            <button
-              onClick={() => setActiveTab('instagram')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'instagram' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
-            >
-              Instagram
-            </button>
-            <button
-              onClick={() => setActiveTab('maps')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'maps' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
-            >
-              Google Maps
-            </button>
-            <button
-              onClick={() => setActiveTab('whatsapp')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'whatsapp' ? 'bg-green-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
-            >
-              WhatsApp
-            </button>
-            <button
-              onClick={() => setActiveTab('socialmedia')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'socialmedia' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
-            >
-              Social Media
-            </button>
+          {/* Tab Nav */}
+          <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(1,3,38,0.6)', border: '1px solid rgba(23,191,96,0.1)' }}>
+            {[
+              { id: 'instagram', label: 'Instagram' },
+              { id: 'maps', label: 'Maps' },
+              { id: 'whatsapp', label: 'WhatsApp' },
+              { id: 'socialmedia', label: 'Social' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200"
+                style={activeTab === tab.id
+                  ? { background: 'linear-gradient(135deg, #17BF60 0%, #17A655 100%)', color: '#010326', boxShadow: '0 2px 12px rgba(23,191,96,0.35)' }
+                  : { color: '#64748b' }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <div className="flex items-center gap-4 bg-slate-950/50 px-4 py-2 rounded-lg border border-white/5">
+          {/* Status */}
+          <div className="flex items-center gap-3 px-4 py-2 rounded-xl shrink-0"
+            style={{ background: 'rgba(1,3,38,0.5)', border: '1px solid rgba(23,191,96,0.08)' }}>
             <div className="flex flex-col items-end">
-              <span className="text-xs text-slate-500 uppercase tracking-widest font-bold">Status</span>
+              <span className="text-xs uppercase tracking-widest font-bold" style={{ color: '#17A655' }}>Status</span>
               <div className="flex items-center gap-2">
-                <span className={`text-sm font-bold ${isRunning ? (activeTab === 'instagram' ? 'text-emerald-400' : 'text-red-400') : 'text-slate-400'}`}>
-                  {status}
-                </span>
-                <span className="relative flex h-3 w-3">
-                  {isRunning && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${activeTab === 'instagram' ? 'bg-emerald-400' : 'bg-red-400'}`}></span>}
-                  <span className={`relative inline-flex rounded-full h-3 w-3 ${isRunning ? (activeTab === 'instagram' ? 'bg-emerald-500' : 'bg-red-500') : 'bg-slate-600'}`}></span>
+                <span className="text-sm font-bold" style={{ color: isRunning ? '#17BF60' : '#475569' }}>{status}</span>
+                <span className="relative flex h-2.5 w-2.5">
+                  {isRunning && <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#17BF60' }} />}
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: isRunning ? '#17BF60' : '#334155' }} />
                 </span>
               </div>
             </div>
-
             {isRunning && (
-              <button
-                onClick={handleStop}
-                className="ml-2 btn-danger flex items-center gap-2"
-              >
-                <Radio className="w-4 h-4" /> STOP
+              <button onClick={handleStop} className="btn-danger flex items-center gap-1.5 text-sm">
+                <Radio className="w-3.5 h-3.5" /> Stop
               </button>
             )}
           </div>

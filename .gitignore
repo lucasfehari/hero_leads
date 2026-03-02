@@ -15,6 +15,11 @@ profile_data
 profiles
 whatsapp_sessions
 
+# Environment — nunca commitar .env real
+.env
+!.env.example
+
+
 # Instagram bot — dados sensíveis e arquivos grandes
 profiles_data/
 server/uploads/
