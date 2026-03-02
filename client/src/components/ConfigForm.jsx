@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Hash, User, MessageCircle, Send, PlayCircle, Users } from 'lucide-react';
+import { Hash, User, MessageCircle, Send, PlayCircle, Users, Trash2 } from 'lucide-react';
+
 import DmWorkflowBuilder from './DmWorkflowBuilder';
 
 const ConfigForm = ({ onStart, isRunning }) => {
@@ -97,67 +98,147 @@ const ConfigForm = ({ onStart, isRunning }) => {
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
 
-            {/* PROFILE SWITCHER */}
-            <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5">
-                <div className="flex justify-between items-center mb-3">
-                    <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                        <User className="w-4 h-4 text-purple-400" /> Conta Conectada
+            {/* INSTAGRAM SESSION MANAGER */}
+            <div className="rounded-xl border overflow-hidden" style={{ background: 'rgba(1,3,38,0.4)', borderColor: 'rgba(23,191,96,0.12)' }}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(23,191,96,0.1)' }}>
+                    <label className="text-sm font-semibold flex items-center gap-2" style={{ color: '#BCF285' }}>
+                        <User className="w-4 h-4" style={{ color: '#17BF60' }} /> Contas Instagram
+                        <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'rgba(23,191,96,0.12)', color: '#17A655' }}>
+                            {profiles.length} conta{profiles.length !== 1 ? 's' : ''}
+                        </span>
                     </label>
-                    <button type="button" onClick={() => setShowAddProfile(!showAddProfile)} className="text-xs text-purple-400 hover:text-purple-300">
-                        + Adicionar Nova
+                    <button
+                        type="button"
+                        onClick={() => setShowAddProfile(!showAddProfile)}
+                        disabled={isRunning}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all"
+                        style={{ background: 'rgba(23,191,96,0.12)', color: '#17BF60', border: '1px solid rgba(23,191,96,0.2)' }}
+                    >
+                        {showAddProfile ? '✕ Cancelar' : '+ Nova Conta'}
                     </button>
                 </div>
 
-                {showAddProfile ? (
-                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                {/* Add account form */}
+                {showAddProfile && (
+                    <div className="px-4 py-3 border-b space-y-2" style={{ borderColor: 'rgba(23,191,96,0.1)', background: 'rgba(23,191,96,0.04)' }}>
                         <input
-                            placeholder="Nome do Perfil (ex: Loja 01)"
-                            className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white"
+                            placeholder="Nome do perfil (ex: Loja01, Pessoal...)"
+                            className="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-all"
+                            style={{ background: 'rgba(1,3,38,0.7)', border: '1px solid rgba(23,191,96,0.2)' }}
                             value={newProfileName} onChange={e => setNewProfileName(e.target.value)}
                         />
                         <button
                             type="button"
                             onClick={async () => {
-                                if (!newProfileName) return alert('Digite um nome para o perfil!');
-                                alert('Vou abrir o navegador. Faça login no Instagram e espere ele fechar sozinho!');
+                                if (!newProfileName.trim()) return alert('Digite um nome para a conta!');
+                                alert('O navegador vai abrir. Faça login no Instagram e aguarde fechar sozinho!');
                                 setIsLoggingIn(true);
                                 try {
                                     const res = await fetch('http://localhost:3000/api/profiles/login', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ name: newProfileName })
+                                        body: JSON.stringify({ name: newProfileName.trim() })
                                     });
                                     const data = await res.json();
                                     if (data.success) {
                                         setShowAddProfile(false);
-                                        setProfiles([...profiles, newProfileName]);
-                                        handleSwitchProfile(newProfileName);
-                                        alert('Perfil Salvo com Sucesso!');
+                                        setNewProfileName('');
+                                        await fetchProfiles();
+                                        handleSwitchProfile(data.profile || newProfileName.trim());
                                     } else {
                                         alert('Erro ao salvar: ' + (data.error || 'Desconhecido'));
                                     }
-                                } catch (e) {
-                                    alert('Erro de conexão: ' + e.message);
-                                }
+                                } catch (e) { alert('Erro de conexão: ' + e.message); }
                                 setIsLoggingIn(false);
                             }}
-                            disabled={isLoggingIn}
-                            className={`w-full py-2 rounded text-sm font-bold text-white transition-all ${isLoggingIn ? 'bg-slate-600 cursor-wait' : 'bg-purple-600 hover:bg-purple-500'}`}
+                            disabled={isLoggingIn || !newProfileName.trim()}
+                            className="w-full py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+                            style={isLoggingIn
+                                ? { background: 'rgba(100,116,139,0.3)', color: '#64748b', cursor: 'wait' }
+                                : { background: 'linear-gradient(135deg, #17BF60, #17A655)', color: '#010326' }}
                         >
-                            {isLoggingIn ? 'Aguardando Login...' : 'Abrir Navegador & Logar'}
+                            {isLoggingIn ? '⏳ Aguardando Login...' : '🌐 Abrir Navegador & Logar'}
                         </button>
                     </div>
-                ) : (
-                    <select
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white appearance-none cursor-pointer"
-                        value={selectedProfile}
-                        onChange={(e) => handleSwitchProfile(e.target.value)}
-                    >
-                        <option value="">Selecione um Perfil...</option>
-                        {profiles.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
                 )}
+
+                {/* Account list */}
+                <div className="divide-y" style={{ divideColor: 'rgba(23,191,96,0.06)' }}>
+                    {profiles.length === 0 && (
+                        <div className="text-center py-6 text-sm" style={{ color: '#475569' }}>
+                            Nenhuma conta adicionada.<br />
+                            <span style={{ color: '#17A655' }}>Clique em "+ Nova Conta" para começar.</span>
+                        </div>
+                    )}
+                    {profiles.map(p => {
+                        const name = typeof p === 'object' ? p.name : p;
+                        const updatedAt = typeof p === 'object' ? p.updated_at : null;
+                        const isActive = selectedProfile === name;
+                        return (
+                            <div key={name}
+                                className="flex items-center gap-3 px-4 py-3 transition-all"
+                                style={{ background: isActive ? 'rgba(23,191,96,0.06)' : 'transparent' }}>
+                                {/* Avatar placeholder */}
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                                    style={{ background: isActive ? 'rgba(23,191,96,0.2)' : 'rgba(100,116,139,0.15)', color: isActive ? '#17BF60' : '#64748b' }}>
+                                    {name[0].toUpperCase()}
+                                </div>
+
+                                {/* Info */}
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold text-white truncate">{name}</span>
+                                        {isActive && (
+                                            <span className="text-xs px-1.5 py-0.5 rounded-full shrink-0 font-medium"
+                                                style={{ background: 'rgba(23,191,96,0.15)', color: '#17BF60' }}>
+                                                ativo
+                                            </span>
+                                        )}
+                                    </div>
+                                    {updatedAt && (
+                                        <p className="text-xs mt-0.5" style={{ color: '#475569' }}>
+                                            Último login: {new Date(updatedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                    {!isActive && (
+                                        <button type="button" onClick={() => handleSwitchProfile(name)}
+                                            className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all"
+                                            style={{ background: 'rgba(23,191,96,0.1)', color: '#17BF60', border: '1px solid rgba(23,191,96,0.2)' }}
+                                            title="Usar esta conta">
+                                            Usar
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            if (!confirm(`Apagar a conta "${name}"? A sessão será removida e será necessário fazer login novamente.`)) return;
+                                            try {
+                                                await fetch(`http://localhost:3000/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                                                if (selectedProfile === name) setSelectedProfile('');
+                                                await fetchProfiles();
+                                            } catch (e) { alert('Erro ao apagar: ' + e.message); }
+                                        }}
+                                        className="p-1.5 rounded-lg transition-all"
+                                        style={{ color: '#475569' }}
+                                        onMouseEnter={e => { e.currentTarget.style.color = '#f87171'; e.currentTarget.style.background = 'rgba(248,113,113,0.1)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.color = '#475569'; e.currentTarget.style.background = 'transparent'; }}
+                                        title="Apagar conta"
+                                        disabled={isRunning}
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
+
 
             {/* IGNORE HISTORY TOGGLE */}
             <div className="bg-slate-900/50 p-4 rounded-xl border border-amber-500/20">

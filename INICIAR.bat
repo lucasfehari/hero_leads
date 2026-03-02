@@ -5,11 +5,14 @@ color 0A
 chcp 65001 >nul 2>&1
 
 echo.
-echo  ╔═══════════════════════════════════════════════════╗
-echo  ║                                                   ║
-echo  ║          BROWZE BOT — Automation Suite            ║
-echo  ║                                                   ║
-echo  ╚═══════════════════════════════════════════════════╝
+echo  __________                                      
+echo  \______   \_______  ______  _  __________ ____  
+echo   ^|    ^|  _/\_  __ \/  _ \ \/ \/ /\___   // __ \ 
+echo   ^|    ^|   \ ^|  ^| \(  ^<_^> )     /  /    /\  ___/ 
+echo   ^|______  / ^|__^|   \____/ \/\_/  /_____ \\___  ^>
+echo           \/                             \/    \/ 
+echo.
+echo                  Automation Suite v1.0
 echo.
 
 :: ─────────────────────────────────────────────────────────────
@@ -39,30 +42,44 @@ if %errorlevel% neq 0 (
 )
 
 :: ─────────────────────────────────────────────────────────────
-:: PASSO 2: Verificar e instalar Visual C++ Build Tools
-::          (necessário para better-sqlite3 / node-gyp)
+:: PASSO 2: Verificar Visual C++ Build Tools (se ja tiver, pula)
 :: ─────────────────────────────────────────────────────────────
+
+:: Metodo 1: vswhere.exe (presente apos qualquer instalacao do VS/BuildTools)
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%VSWHERE%" (
+    "%VSWHERE%" -products * -requires Microsoft.VisualCpp.Tools.HostX64.TargetX64 -latest >nul 2>&1
+    if %errorlevel% equ 0 (
+        echo  [OK] Visual C++ Build Tools: ja instalado.
+        goto :vc_done
+    )
+)
+
+:: Metodo 2: cl.exe no PATH
 where cl >nul 2>&1
 if %errorlevel% equ 0 (
     echo  [OK] Visual C++ Build Tools: ja instalado.
     goto :vc_done
 )
 
-:: Também verifica via registry (VS2019/2022 Build Tools)
-reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\17.0" >nul 2>&1
-if %errorlevel% equ 0 goto :vc_done
-reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\16.0" >nul 2>&1
-if %errorlevel% equ 0 goto :vc_done
-reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\SxS\VS7" >nul 2>&1
-if %errorlevel% equ 0 goto :vc_done
+:: Metodo 3: pasta padrao de instalacao do Build Tools 2022
+if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC" (
+    echo  [OK] Visual C++ Build Tools 2022: ja instalado.
+    goto :vc_done
+)
+if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC" (
+    echo  [OK] Visual C++ Build Tools 2019: ja instalado.
+    goto :vc_done
+)
 
+:: Nao encontrado — instalar automaticamente
 echo.
 echo  [*] Visual C++ Build Tools nao encontrado.
 echo      Instalando automaticamente... (pode levar 5-10 min)
 echo      O processo roda em segundo plano — aguarde!
 echo.
 
-:: ── Tenta via winget (Windows 10/11 com App Installer) ──────
+:: Tenta via winget (Windows 10/11)
 winget --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo  [*] Usando winget para instalar Build Tools...
@@ -76,35 +93,27 @@ if %errorlevel% equ 0 (
     echo  [!] winget falhou. Tentando download direto...
 )
 
-:: ── Fallback: Download direto do instalador oficial ──────────
+:: Fallback: download direto do instalador oficial
 set "VC_INSTALLER=%TEMP%\vs_BuildTools.exe"
-echo  [*] Baixando Visual C++ Build Tools (~4 MB launcher)...
+echo  [*] Baixando Visual C++ Build Tools...
 powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_BuildTools.exe' -OutFile '%VC_INSTALLER%' }"
 
 if not exist "%VC_INSTALLER%" (
-    echo.
-    echo  [ERRO] Nao foi possivel baixar o Visual C++ Build Tools.
-    echo.
-    echo  Instale manualmente:
-    echo  1. Acesse: https://aka.ms/vs/17/release/vs_BuildTools.exe
-    echo  2. Execute o instalador
-    echo  3. Selecione: "Desenvolvimento para Desktop com C++"
-    echo  4. Execute este arquivo novamente.
-    echo.
+    echo  [ERRO] Nao foi possivel baixar. Instale manualmente:
+    echo  https://aka.ms/vs/17/release/vs_BuildTools.exe
+    echo  Selecione: "Desenvolvimento para Desktop com C++"
     pause & exit /b 1
 )
 
-echo  [*] Instalando Build Tools silenciosamente (aguarde 5-10 min)...
+echo  [*] Instalando silenciosamente (aguarde 5-10 min)...
 "%VC_INSTALLER%" --quiet --wait --norestart --nocache ^
     --add Microsoft.VisualStudio.Workload.VCTools ^
     --includeRecommended
-
-if %errorlevel% neq 0 (
-    echo  [AVISO] Instalacao pode ter tido avisos. Continuando...
-)
 echo  [OK] Visual C++ Build Tools instalado!
 
 :vc_done
+
+
 
 
 :: ─────────────────────────────────────────────────────────────
