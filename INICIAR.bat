@@ -18,29 +18,39 @@ echo.
 :: ─────────────────────────────────────────────────────────────
 :: PASSO 1: Verificar Node.js
 :: ─────────────────────────────────────────────────────────────
+if exist "%~dp0.node\node-v20.19.1-win-x64\node.exe" (
+    set "PATH=%~dp0.node\node-v20.19.1-win-x64;!PATH!"
+)
+
 node --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo  [!] Node.js não encontrado. Baixando e instalando...
-    echo      Aguarde, isso pode levar alguns minutos.
+if !errorlevel! neq 0 (
+    echo  [!] Node.js nao encontrado. Usando versao portatil...
+    echo      Nao se preocupe, nenhum programa sera "instalado" no Windows.
+    echo      Rodaremos o Node.js direto desta pasta. Aguarde uns minutos...
     echo.
-    powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v20.19.1/node-v20.19.1-x64.msi' -OutFile '%TEMP%\node_installer.msi' }"
-    if not exist "%TEMP%\node_installer.msi" (
-        echo  [ERRO] Não foi possível baixar o Node.js.
-        echo  Acesse https://nodejs.org e instale manualmente, depois execute novamente.
+    if exist "%TEMP%\node_portable.zip" del /q "%TEMP%\node_portable.zip"
+    powershell -Command "& { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://nodejs.org/dist/v20.19.1/node-v20.19.1-win-x64.zip' -OutFile '%TEMP%\node_portable.zip' }"
+    
+    if not exist "%TEMP%\node_portable.zip" (
+        echo  [ERRO] Nao foi possivel baixar o Node.js.
+        echo  Verifique sua internet e tente novamente.
         pause & exit /b 1
     )
-    msiexec /i "%TEMP%\node_installer.msi" /quiet /norestart
-    set "PATH=%PATH%;%ProgramFiles%\nodejs"
+    
+    echo  [*] Extraindo arquivos silenciosamente...
+    powershell -Command "Expand-Archive -Path '%TEMP%\node_portable.zip' -DestinationPath '%~dp0.node' -Force"
+    
+    set "PATH=%~dp0.node\node-v20.19.1-win-x64;!PATH!"
+    
     node --version >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo  [!] Node.js instalado. REINICIE o computador e execute este arquivo novamente.
+    if !errorlevel! neq 0 (
+        echo  [ERRO] Falha ao rodar o Node.js portatil.
         pause & exit /b 1
     )
-    echo  [OK] Node.js instalado com sucesso!
+    echo  [OK] Node.js portatil rodando com sucesso!
 ) else (
     for /f "tokens=*" %%v in ('node --version') do echo  [OK] Node.js: %%v
 )
-
 :: ─────────────────────────────────────────────────────────────
 :: PASSO 2: Verificar Visual C++ Build Tools (se ja tiver, pula)
 :: ─────────────────────────────────────────────────────────────
