@@ -199,6 +199,71 @@ const findMicButton = async (page) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FIND SEND BUTTON — mirrors findMicButton, 3-strategy cascade
+// ─────────────────────────────────────────────────────────────────────────────
+const findSendButton = async (page) => {
+    // The exact SVG path fragment from the user's HTML DOM of the audio send button.
+    // This is UNIQUE to the audio send arrow — the text send button has a different path.
+    const SEND_PATH_FRAGMENT = 'M22.513 3.576';
+
+    // ── Strategy 1 (PRIMARY): SVG path fragment — most specific, avoids false positives ──
+    const s1 = await page.evaluateHandle((frag) => {
+        const match = Array.from(document.querySelectorAll('path'))
+            .find(p => (p.getAttribute('d') || '').startsWith(frag));
+        if (!match) return null;
+        return match.closest('div[role="button"]') || match.closest('button') || match.closest('svg');
+    }, SEND_PATH_FRAGMENT);
+
+    if (s1 && s1.asElement()) {
+        console.log('[SEND] ✅ Estratégia 1: Encontrado via SVG path fragment (mais específico).');
+        return s1;
+    }
+
+    // ── Strategy 2: SVG <title>Send</title> ───────────────────────────────────
+    const s2 = await page.evaluateHandle(() => {
+        const titles = Array.from(document.querySelectorAll('svg title'));
+        const sendTitle = titles.find(t => t.textContent.trim().toLowerCase() === 'send');
+        if (!sendTitle) return null;
+        return sendTitle.closest('div[role="button"]') || sendTitle.closest('button');
+    });
+
+    if (s2 && s2.asElement()) {
+        console.log('[SEND] ✅ Estratégia 2: Encontrado via SVG <title>Send</title>.');
+        return s2;
+    }
+
+    // ── Strategy 3: Positional — rightmost small button to the right of input ─
+    const s3 = await page.evaluateHandle(() => {
+        const input = document.querySelector('div[contenteditable="true"], textarea, div[role="textbox"]');
+        if (!input) return null;
+        const inputRect = input.getBoundingClientRect();
+
+        const candidates = Array.from(document.querySelectorAll('div[role="button"], button'))
+            .filter(el => {
+                const r = el.getBoundingClientRect();
+                return (
+                    r.width > 0 && r.width < 120 &&
+                    r.height > 0 &&
+                    r.left >= inputRect.right - 10 &&
+                    Math.abs((r.top + r.height / 2) - (inputRect.top + inputRect.height / 2)) < 40 &&
+                    el.querySelector('svg')
+                );
+            })
+            .sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left); // rightmost first
+
+        return candidates[0] || null;
+    });
+
+    if (s3 && s3.asElement()) {
+        console.log('[SEND] ✅ Estratégia 3: Encontrado via posição (botão à direita do input).');
+        return s3;
+    }
+
+    console.log('[SEND] ❌ Botão Enviar não encontrado em nenhuma estratégia.');
+    return null;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SEND AUDIO
 // ─────────────────────────────────────────────────────────────────────────────
 const sendAudioHelper = async (page, audioPath) => {
@@ -268,60 +333,45 @@ const sendAudioHelper = async (page, audioPath) => {
                 return false;
             }
 
-            const cx = micBox.x + micBox.width / 2;
-            const cy = micBox.y + micBox.height / 2;
+            // ── STRATEGY: micBtn.click() → page.mouse.down() (the only proven approach) ──
+            // Background: dispatchEvent synthetic events don't trigger getUserMedia on Instagram.
+            // Only real CDP input events (via page.mouse.*) work.
+            // Sequence: click() opens recording UI → mouse.down() at same coords 
+            //           triggers getUserMedia → wait duration → mouse.up() releases = shows Send btn
 
-            // Step 1: Click mic to open the recording UI
             await micBtn.evaluate(el => el.scrollIntoView({ block: 'center' }));
-            await randomDelay(400, 600);
+            await randomDelay(600, 900); // DOM stabilization
+
+            // Re-fetch coords after scroll to avoid stale bounding box
+            const box = await micBtn.boundingBox();
+            if (!box) {
+                console.log('[AUDIO] ❌ Elemento mic ficou stale ou invisível após scroll.');
+                return false;
+            }
+            const cx = box.x + box.width / 2;
+            const cy = box.y + box.height / 2;
+
+            // Make sure the page has absolute focus to avoid background pausing
+            await page.bringToFront();
+
+            // Step 1: Native Puppeteer click to open recording UI
+            await page.mouse.move(cx, cy, { steps: 5 });
+            await randomDelay(200, 400);
             await micBtn.click();
-            console.log('[AUDIO] 🖱️ Mic clicado — aguardando UI de gravação...');
-            await randomDelay(1000, 1500);  // Wait for recording UI to appear
+            console.log('[AUDIO] 🖱️ Mic clicado (abre recording UI)...');
+            await randomDelay(400, 600); // Small wait for recording UI to appear
 
-            // Step 2: Inspect DOM to find the recording button that appeared
-            const recordingUI = await page.evaluate(() => {
-                const recordTexts = ['gravar', 'record', 'hold', 'segurar', 'pressione', 'clipe de voz', 'voice clip', 'iniciar gravação', 'start recording'];
-                const els = [];
-                for (const el of Array.from(document.querySelectorAll('[aria-label], button, div[role="button"]'))) {
-                    if (el.offsetWidth === 0 && el.offsetHeight === 0) continue;
-                    const lbl = (el.getAttribute('aria-label') || el.textContent || '').toLowerCase().trim();
-                    const rect = el.getBoundingClientRect();
-                    els.push({ lbl, x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), w: Math.round(rect.width), h: Math.round(rect.height) });
-                }
-                return els.slice(0, 30);
-            });
-            console.log('[AUDIO] UI após click mic:', JSON.stringify(recordingUI.map(e => e.lbl)));
+            // Step 2: CDP mouse.down at same position to activate getUserMedia
+            await page.mouse.move(cx, cy, { steps: 3 });
+            await page.mouse.down();
+            console.log('[AUDIO] 🎙️ Mic PRESSIONADO via CDP — aguardando getUserMedia...');
 
-            // Step 3: Find the actual record button (by label or by position near mic)
-            let recordBtnInfo = recordingUI.find(e => {
-                const lbl = e.lbl;
-                return lbl.includes('gravar') || lbl.includes('record') || lbl.includes('hold') ||
-                    lbl.includes('segurar') || lbl.includes('pressione') || lbl.includes('clipe') ||
-                    lbl.includes('voice clip') || lbl.includes('iniciar');
-            });
-
+            // Poll for getUserMedia — fires when Instagram starts using the mic
             let duration = null;
-
-            if (recordBtnInfo) {
-                console.log(`[AUDIO] 🎙️ Botão de gravação encontrado: "${recordBtnInfo.lbl}" em x=${recordBtnInfo.x}, y=${recordBtnInfo.y}`);
-                // Hold this specific button
-                await page.mouse.move(recordBtnInfo.x, recordBtnInfo.y, { steps: 5 });
-                await page.mouse.down();
-                for (let i = 0; i < 14; i++) {
-                    await randomDelay(500, 500);
-                    duration = await page.evaluate(() => window.__audioDuration__);
-                    if (duration && duration > 0) break;
-                }
-            } else {
-                // Fallback: hold at the original mic position and try CDP hold
-                console.log('[AUDIO] 🎙️ Sem botão específico — hold na posição original...');
-                await page.mouse.move(cx, cy, { steps: 5 });
-                await page.mouse.down();
-                for (let i = 0; i < 14; i++) {
-                    await randomDelay(500, 500);
-                    duration = await page.evaluate(() => window.__audioDuration__);
-                    if (duration && duration > 0) break;
-                }
+            for (let i = 0; i < 12; i++) {
+                await randomDelay(500, 500);
+                duration = await page.evaluate(() => window.__audioDuration__);
+                if (duration && duration > 0) break;
             }
 
             if (!duration || duration < 1) {
@@ -331,57 +381,95 @@ const sendAudioHelper = async (page, audioPath) => {
                 console.log(`[AUDIO] ✅ Áudio injetado! Duração: ${Math.round(duration)}s`);
             }
 
-            console.log(`[AUDIO] Gravando por ${Math.round(duration)}s...`);
-            await randomDelay(duration * 1000 + 500, duration * 1000 + 1200);
+            // Step 3: Hold for the full audio duration and wiggle the mouse to prevent auto-pause
+            console.log(`[AUDIO] Gravando por ${Math.round(duration)}s... (hold ativo)`);
+            const targetTime = Date.now() + (duration * 1000) + 800; // Add small buffer
 
-            // Release hold and clean up console listener
-            await page.mouse.up().catch(() => { });
-            page.off('console', consoleHandler);
-            console.log('[AUDIO] 🛑 Mic liberado — aguardando UI de envio...');
-            await randomDelay(800, 1200);
-
-            // Log what buttons are visible in the DOM at this point
-            const uiState = await page.evaluate(() =>
-                Array.from(document.querySelectorAll('[aria-label]'))
-                    .filter(el => el.offsetWidth > 0)
-                    .map(el => el.getAttribute('aria-label'))
-                    .slice(0, 20)
-            );
-            console.log('[AUDIO] UI state após mic:', JSON.stringify(uiState));
-
-            // Click Send
-            console.log('[AUDIO] Procurando botão Enviar...');
-            const sendLabels = ['send', 'enviar', 'enviá-lo', 'send voice message', 'enviar mensagem de voz'];
-            const sendBtn = await page.evaluateHandle((labels) => {
-                for (const el of Array.from(document.querySelectorAll('[aria-label]'))) {
-                    const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
-                    if (labels.some(s => lbl === s || lbl.includes(s))) {
-                        return el.closest('button') || el.closest('div[role="button"]') || el;
-                    }
+            try {
+                while (Date.now() < targetTime) {
+                    // Micro-movements (wiggle) to simulate human finger and prevent Instagram UI idle timeout
+                    const wiggleX = cx + (Math.random() * 2 - 1); // -1 to +1 px
+                    const wiggleY = cy + (Math.random() * 2 - 1); // -1 to +1 px
+                    await page.mouse.move(wiggleX, wiggleY, { steps: 2 });
+                    await randomDelay(100, 200);
                 }
-                for (const b of Array.from(document.querySelectorAll('button, div[role="button"]'))) {
-                    const t = b.textContent.toLowerCase().trim();
-                    if (t === 'send' || t === 'enviar') return b;
-                }
-                return null;
-            }, sendLabels);
-
-            if (sendBtn && sendBtn.asElement()) {
-                const sendBox = await sendBtn.boundingBox();
-                if (sendBox && sendBox.width > 0) {
-                    await page.mouse.click(sendBox.x + sendBox.width / 2, sendBox.y + sendBox.height / 2);
-                } else {
-                    await sendBtn.click();
-                }
-                console.log('[AUDIO] ✅ Send clicado! Aguardando upload...');
-                await randomDelay(4000, 7000);
-                return true;
-            } else {
-                console.log('[AUDIO] Send button não encontrado — tentando Enter.');
-                await page.keyboard.press('Enter');
-                await randomDelay(3000, 5000);
-                return true;
+            } catch (wiggleErr) {
+                // Page may have navigated during hold — not fatal, continue to release
+                console.log(`[AUDIO] ⚠️ Wiggle loop encerrado (${wiggleErr.message}). Prosseguindo para envio...`);
             }
+
+            // Step 4: Release mouse — triggers UI to show Send
+            await page.mouse.up().catch(() => { });
+            console.log('[AUDIO] 🛑 Mic SOLTO — aguardando botão Enviar...');
+
+            await randomDelay(1200, 1800);
+
+            // ─────────────────────────────────────────────────────────────
+            // FIND & CLICK SEND — using findSendButton (same as findMicButton)
+            // ─────────────────────────────────────────────────────────────
+
+            // Poll until the Send button appears (up to 12 × 500ms = 6s)
+            let sendBtn = null;
+            for (let i = 0; i < 12; i++) {
+                await randomDelay(400, 500);
+                sendBtn = await findSendButton(page);
+                if (sendBtn && sendBtn.asElement()) break;
+            }
+
+            if (!sendBtn || !sendBtn.asElement()) {
+                console.log('[AUDIO] ❌ Botão Enviar não detectado — abortando envio.');
+                return false;
+            }
+
+            console.log('[AUDIO] ✅ Botão Enviar detectado. Executando clique humano...');
+
+            await sendBtn.evaluate(el => el.scrollIntoView({ block: 'center' }));
+            await randomDelay(500, 800);
+
+            const boxSend = await sendBtn.boundingBox();
+            if (!boxSend) {
+                console.log('[AUDIO] ❌ BoundingBox inválido no botão enviar.');
+                return false;
+            }
+
+            const sx = boxSend.x + boxSend.width / 2;
+            const sy = boxSend.y + boxSend.height / 2;
+
+            // Human-like click (down + up separately, not instant)
+            await page.mouse.move(sx, sy, { steps: 6 });
+            await randomDelay(250, 450);
+            await page.mouse.down();
+            await randomDelay(80, 150);
+            await page.mouse.up();
+
+            console.log('[AUDIO] 📨 Send clicado com sucesso. Aguardando confirmação...');
+
+            // ─────────────────────────────────────────
+            // CONFIRM: Wait for recording UI to DISAPPEAR
+            // (Unambiguous proof the audio was sent and the recording bar closed)
+            // ─────────────────────────────────────────
+
+            try {
+                // The recording UI always has an X (cancel) button visible during recording.
+                // When the audio is sent, that UI closes — the cancel button vanishes.
+                await page.waitForFunction(() => {
+                    // Check the recording cancel button is gone (X circle button left of the timer)
+                    const cancelBtn = Array.from(document.querySelectorAll('[aria-label]')).find(el => {
+                        const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+                        return lbl.includes('cancel') || lbl.includes('cancelar') || lbl.includes('excluir');
+                    });
+                    // Also check the recording timer slider is gone
+                    const recSlider = document.querySelector('div[role="slider"]');
+                    return !cancelBtn && !recSlider;
+                }, { timeout: 15000 });
+                console.log('[AUDIO] ✅ UI de gravação fechou — áudio enviado com sucesso!');
+            } catch {
+                console.log('[AUDIO] ⚠️ Timeout esperando UI de gravação fechar. O áudio pode ter sido enviado mesmo assim.');
+            }
+
+            // Buffer final real antes de permitir fechamento
+            await randomDelay(5000, 8000);
+            return true;
 
         } else {
             const visibleLabels = await page.evaluate(() =>
@@ -470,7 +558,14 @@ const sendDM = async (page, username, message, audios = []) => {
             }
 
             console.log('[DM] Proceeding to sendAudioHelper...');
-            return await sendAudioHelper(page, audioConfig.path);
+            const audioSent = await sendAudioHelper(page, audioConfig.path);
+
+            if (audioSent) {
+                console.log('[DM] Audio sent successfully. Waiting extra time for upload to finish...');
+                await randomDelay(8000, 12000); // CRITICAL: Wait for upload before closing/moving on
+            }
+
+            return audioSent;
         }
 
         // 5. Text message
