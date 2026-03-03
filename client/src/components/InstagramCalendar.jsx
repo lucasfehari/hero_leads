@@ -65,7 +65,7 @@ function MonthlyView({ year, month, posts, onEdit, onReschedule }) {
 
         const existingTime = post.scheduled_at ? new Date(post.scheduled_at) : new Date();
         const newDate = new Date(year, month, day, existingTime.getHours(), existingTime.getMinutes());
-        onReschedule(postId, newDate.toISOString().slice(0, 19).replace('T', ' '));
+        onReschedule(postId, newDate);
         setDraggingOver(null);
     }, [posts, year, month, onReschedule]);
 
@@ -99,10 +99,10 @@ function MonthlyView({ year, month, posts, onEdit, onReschedule }) {
                             onDragLeave={() => setDraggingOver(null)}
                             onDrop={e => handleDrop(e, day)}
                             className={`min-h-[90px] rounded-lg p-1.5 flex flex-col gap-1 transition-all border ${isOver
-                                    ? 'border-purple-500/60 bg-purple-500/10'
-                                    : isToday
-                                        ? 'border-purple-500/30 bg-purple-950/30'
-                                        : 'border-white/5 bg-slate-900/30 hover:bg-slate-900/50'
+                                ? 'border-purple-500/60 bg-purple-500/10'
+                                : isToday
+                                    ? 'border-purple-500/30 bg-purple-950/30'
+                                    : 'border-white/5 bg-slate-900/30 hover:bg-slate-900/50'
                                 }`}
                         >
                             <span className={`text-xs font-bold self-end px-1.5 py-0.5 rounded-full ${isToday ? 'bg-purple-600 text-white' : 'text-slate-400'}`}>
@@ -153,7 +153,7 @@ function WeeklyView({ weekStart, posts, onEdit, onReschedule }) {
         const postId = Number(e.dataTransfer.getData('postId'));
         if (!postId) return;
         const newDate = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, 0);
-        onReschedule(postId, newDate.toISOString().slice(0, 19).replace('T', ' '));
+        onReschedule(postId, newDate);
         setDraggingOverSlot(null);
     }, [onReschedule]);
 

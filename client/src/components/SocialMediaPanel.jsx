@@ -241,7 +241,7 @@ function PostComposer({ accounts, editingPost, onSaved, onCancel }) {
     const [hashtags, setHashtags] = useState(editingPost?.hashtags || '');
     const [hashtagInput, setHashtagInput] = useState('');
     const [notes, setNotes] = useState(editingPost?.notes || '');
-    const [scheduledAt, setScheduledAt] = useState(editingPost?.scheduled_at ? editingPost.scheduled_at.slice(0, 16) : '');
+    const [scheduledAt, setScheduledAt] = useState(editingPost?.scheduled_at ? new Date(new Date(editingPost.scheduled_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '');
     const [saving, setSaving] = useState(false);
     const fileRef = useRef();
 
@@ -336,7 +336,7 @@ function PostComposer({ accounts, editingPost, onSaved, onCancel }) {
                 post_type: postType, aspect_ratio: aspectRatio,
                 media_files: ready.map(m => ({ path: m.path, filename: m.filename, mediaType: m.mediaType })),
                 caption, hashtags, notes,
-                scheduled_at: scheduledAt || null, status,
+                scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null, status,
             };
             const isEdit = !!editingPost;
             const res = await fetch(isEdit ? `${API}/posts/${editingPost.id}` : `${API}/posts`, {
@@ -656,7 +656,7 @@ export default function SocialMediaPanel({ socket }) {
     };
 
     const handleReschedule = useCallback(async (postId, newDatetime) => {
-        const r = await fetch(`${API}/posts/${postId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scheduled_at: newDatetime }) });
+        const r = await fetch(`${API}/posts/${postId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scheduled_at: new Date(newDatetime).toISOString() }) });
         const d = await r.json();
         if (d.success) setPosts(prev => prev.map(p => p.id === postId ? { ...p, scheduled_at: d.post.scheduled_at } : p));
     }, []);

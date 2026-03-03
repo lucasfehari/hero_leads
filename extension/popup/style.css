@@ -1,0 +1,267 @@
+:root {
+    --bg-dark: #121212;
+    --bg-panel: #1e1e1e;
+    --text-main: #f0f0f0;
+    --text-muted: #a0a0a0;
+    --primary: #00ff88;
+    --primary-hover: #00cc6a;
+    --danger: #ff4757;
+    --border: #333;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    width: 320px;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+}
+
+.logo {
+    font-weight: bold;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--primary);
+}
+
+.badge {
+    background: var(--primary);
+    color: #000;
+    font-size: 9px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: 800;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.dot.idle {
+    background: #555;
+}
+
+.dot.active {
+    background: var(--primary);
+    box-shadow: 0 0 5px var(--primary);
+}
+
+.container {
+    padding: 15px;
+}
+
+.section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--primary);
+    margin: 15px 0 8px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+.container>.section-title:first-child {
+    margin-top: 0;
+}
+
+.input-group {
+    margin-bottom: 12px;
+}
+
+.input-group label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+input[type="text"],
+input[type="number"],
+textarea {
+    width: 100%;
+    padding: 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    color: #fff;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+input:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.prefix {
+    position: absolute;
+    left: 10px;
+    color: var(--primary);
+    font-weight: bold;
+}
+
+.input-wrapper input {
+    padding-left: 25px;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 60px;
+}
+
+.hint {
+    font-size: 10px;
+    color: #777;
+    margin-top: 4px;
+    display: block;
+}
+
+.row {
+    display: flex;
+    gap: 10px;
+}
+
+.split {
+    flex: 1;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+.checkbox-group input {
+    margin-right: 8px;
+    accent-color: var(--primary);
+}
+
+.stats-box {
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 15px;
+}
+
+.stats-box strong {
+    color: var(--primary);
+    font-size: 14px;
+}
+
+.footer-actions {
+    display: flex;
+    gap: 10px;
+    padding: 0 15px 15px 15px;
+}
+
+.btn {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    font-size: 12px;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.primary {
+    background: var(--primary);
+    color: #000;
+}
+
+.primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+}
+
+.secondary {
+    background: var(--border);
+    color: #fff;
+}
+
+.secondary:hover:not(:disabled) {
+    background: #444;
+}
+
+.log-container {
+    background: #0a0a0a;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.log-header {
+    padding: 5px 15px;
+    font-size: 10px;
+    color: #777;
+    border-bottom: 1px solid #222;
+    text-transform: uppercase;
+}
+
+.log-output {
+    height: 80px;
+    overflow-y: auto;
+    padding: 10px 15px;
+    font-size: 11px;
+    font-family: monospace;
+    color: #ccc;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.log-line {
+    border-left: 2px solid #333;
+    padding-left: 5px;
+}
+
+.log-line.error {
+    color: var(--danger);
+    border-left-color: var(--danger);
+}
+
+.log-line.success {
+    color: var(--primary);
+    border-left-color: var(--primary);
+}
