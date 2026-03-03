@@ -257,8 +257,15 @@ async function triggerInstagramLogin(accountId, name, cookieFile, io) {
     console.log(`[IG] Waiting for user to log in to "${name}"...`);
 
     try {
-        // Wait up to 5 minutes for the home page indicator
-        await page.waitForSelector('svg[aria-label="Home"], svg[aria-label="Página inicial"], svg[aria-label="Início"], a[href="/"]', { timeout: 300000 });
+        // Wait up to 5 minutes for the login form to disappear and URL to not be any login/challenge page
+        await page.waitForFunction(() => {
+            const isRootLogin = window.location.pathname === '/' && document.querySelector('input[name="username"]');
+            const isLoginOrChallenge = window.location.pathname.includes('/login') || window.location.pathname.includes('/challenge');
+            return !isRootLogin && !isLoginOrChallenge;
+        }, { timeout: 300000 });
+
+        // Wait for session cookies to be written fully (Instagram sometimes has a slight delay)
+        await new Promise(r => setTimeout(r, 4000));
     } catch {
         await browser.close();
         db.prepare('UPDATE ig_accounts SET status = ? WHERE id = ?').run('disconnected', accountId);
@@ -270,12 +277,14 @@ async function triggerInstagramLogin(accountId, name, cookieFile, io) {
     let username = null;
     try {
         username = await page.evaluate(() => {
-            const meta = document.querySelector('meta[property="al:ios:url"]');
-            if (meta) {
-                const match = meta.content.match(/user\?id=(\w+)/);
-                if (match) return null;
+            // Best method: Profile image has alt text "[username]'s profile picture" or "[username] do perfil"
+            const img = document.querySelector('img[alt$="\'s profile picture"], img[alt$=" do perfil"], img[alt$="foto de perfil"]');
+            if (img && img.alt) {
+                let name = img.alt;
+                name = name.replace('\'s profile picture', '').replace(' do perfil', '').replace('foto de perfil de ', '').replace('foto de perfil', '').trim();
+                if (name) return name;
             }
-            // Try nav link
+            // Fallback
             const links = [...document.querySelectorAll('a[href^="/"]')];
             const profileLink = links.find(l => l.href.match(/instagram\.com\/[^/]+\/?$/) && !l.href.includes('explore'));
             return profileLink ? profileLink.href.split('/').filter(Boolean).pop() : null;

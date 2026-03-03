@@ -447,51 +447,53 @@ async function publishPost(post) {
             // page.keyboard.type() sends keydown/keyup events but does NOT trigger React's
             // synthetic onChange, so the text appears on screen but React's state is empty → caption lost on submit.
             // Fix: use document.execCommand('insertText') which fires InputEvent that React listens to.
-            const captionInserted = await page.evaluate((text) => {
-                const dialog = document.querySelector('div[role="dialog"]');
-                const scope = dialog || document;
+            let captionInserted = false;
+            try {
+                // Focus the box and clear existing text
+                const boxFocused = await page.evaluate(() => {
+                    const dialog = document.querySelector('div[role="dialog"]') || document;
+                    let box = null;
+                    const labels = ['Write a caption…', 'Write a caption...', 'Escreva uma legenda…', 'Escreva uma legenda...', 'Escribe un pie de foto…'];
+                    for (const label of labels) {
+                        box = dialog.querySelector(`[aria-label="${label}"]`);
+                        if (box) break;
+                    }
+                    if (!box) box = dialog.querySelector('[contenteditable="true"]');
+                    if (!box) return false;
 
-                // Find the caption contenteditable
-                let box = null;
-                const labels = [
-                    'Write a caption…', 'Write a caption...', 'Escreva uma legenda…',
-                    'Escreva uma legenda...', 'Escribe un pie de foto…',
-                ];
-                for (const label of labels) {
-                    box = scope.querySelector(`[aria-label="${label}"]`);
-                    if (box) break;
+                    box.focus();
+                    document.execCommand('selectAll', false, null);
+                    document.execCommand('delete', false, null);
+                    return true;
+                });
+
+                if (boxFocused) {
+                    // Type the caption using Puppeteer's native keyboard to ensure React registers keystrokes
+                    // Delay is small to type fast but still register
+                    await page.keyboard.type(fullCaption, { delay: 10 });
+                    captionInserted = true;
                 }
-                if (!box) box = scope.querySelector('[contenteditable="true"]');
-                if (!box) return false;
-
-                box.focus();
-                // Clear any existing content first
-                document.execCommand('selectAll', false, null);
-                document.execCommand('delete', false, null);
-                // Insert the full caption — this fires InputEvent and React updates its state
-                return document.execCommand('insertText', false, text);
-            }, fullCaption);
+            } catch (err) {
+                log(`Error typing caption: ${err.message}`, 'error');
+            }
 
             if (captionInserted) {
-                log(`Caption inserted via execCommand (${fullCaption.length} chars).`);
+                log(`Caption inserted via keyboard simulation (${fullCaption.length} chars).`);
             } else {
-                // Fallback: use clipboard paste (also triggers React's events)
-                log('execCommand failed — trying clipboard paste fallback...', 'info');
+                // Fallback: use clipboard paste and Control+V to trigger React's events
+                log('Keyboard typing failed — trying clipboard paste fallback...', 'info');
                 await page.evaluate((text) => {
-                    // Write to clipboard then paste
                     return navigator.clipboard.writeText(text).catch(() => {
-                        // navigator.clipboard not available — use input event simulation
-                        const dialog = document.querySelector('div[role="dialog"]');
-                        const box = dialog ? dialog.querySelector('[contenteditable="true"]') : null;
-                        if (!box) return;
-                        box.focus();
-                        // Dispatch a paste event with the caption as data
-                        const dt = new DataTransfer();
-                        dt.setData('text/plain', text);
-                        box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+                        const dialog = document.querySelector('div[role="dialog"]') || document;
+                        const box = dialog.querySelector('[contenteditable="true"]');
+                        if (box) {
+                            box.focus();
+                            const dt = new DataTransfer();
+                            dt.setData('text/plain', text);
+                            box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+                        }
                     });
                 }, fullCaption);
-                // After writing to clipboard, send Ctrl+V
                 await page.keyboard.down('Control');
                 await page.keyboard.press('v');
                 await page.keyboard.up('Control');

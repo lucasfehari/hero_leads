@@ -25,7 +25,7 @@ profiles_data/
 server/uploads/
 server/db/*.db
 server/db/*.db-journal
-
+server/instagram/cookies/*.json
 # Screenshots / prints
 *.png
 *.jpg

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Browze Bot Lite</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="header">
+        <div class="logo">
+            <div class="icon-orb"></div>
+            Browze Bot <span class="badge">LITE</span>
+        </div>
+        <div class="status-indicator">
+            <div class="dot idle" id="statusDot"></div>
+            <span id="statusText">Parado</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <form id="botForm">
+
+            <!-- Target Config -->
+            <div class="section-title">1. Selecione o Alvo</div>
+            <div class="input-group">
+                <label>Buscar por Hashtag (sem o #)</label>
+                <div class="input-wrapper">
+                    <span class="prefix">#</span>
+                    <input type="text" id="targetHashtag" placeholder="ex: maquiagem" required>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Quantidade de Perfis por Ciclo</label>
+                <input type="number" id="limit" value="10" min="1" max="50">
+            </div>
+
+            <!-- Action Config -->
+            <div class="section-title">2. Ações no Perfil</div>
+
+            <div class="checkbox-group">
+                <label class="custom-checkbox">
+                    <input type="checkbox" id="doFollow" checked>
+                    <span class="checkmark"></span>
+                    Seguir Perfil
+                </label>
+
+                <label class="custom-checkbox">
+                    <input type="checkbox" id="doLike" checked>
+                    <span class="checkmark"></span>
+                    Curtir Última Foto
+                </label>
+            </div>
+
+            <div class="input-group" style="margin-top: 15px;">
+                <label>Mensagem a enviar (DM)</label>
+                <textarea id="dmMessage" rows="3" placeholder="Sua mensagem de texto aqui..."></textarea>
+                <span class="hint">Dica: Use quebras de linha normalmente</span>
+            </div>
+
+            <!-- Delays Config -->
+            <div class="section-title">3. Ritmo (Segurança)</div>
+            <div class="row">
+                <div class="input-group split">
+                    <label>Espera Mín. (s)</label>
+                    <input type="number" id="minDelay" value="30">
+                </div>
+                <div class="input-group split">
+                    <label>Espera Máx. (s)</label>
+                    <input type="number" id="maxDelay" value="90">
+                </div>
+            </div>
+        </form>
+
+        <div class="stats-box">
+            Perfis Abordados Hoje: <strong id="processedCount">0</strong>
+        </div>
+
+    </div>
+
+    <div class="footer-actions">
+        <button type="button" id="startBtn" class="btn primary">INICIAR BOT</button>
+        <button type="button" id="stopBtn" class="btn secondary" disabled>PARAR</button>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="log-container">
+        <div class="log-header">Log de Atividade</div>
+        <div id="logOutput" class="log-output">
+            <div class="log-line">Aguardando início...</div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
