@@ -468,9 +468,16 @@ async function publishPost(post) {
                 });
 
                 if (boxFocused) {
-                    // Type the caption using Puppeteer's native keyboard to ensure React registers keystrokes
-                    // Delay is small to type fast but still register
-                    await page.keyboard.type(fullCaption, { delay: 10 });
+                    // Type the caption slower to ensure React registers keystrokes and it looks human
+                    // Delay is increased to avoid dropping characters or state.
+                    await page.keyboard.type(fullCaption, { delay: 50 });
+
+                    // Trigger final React update just in case: Space + Backspace
+                    await randomDelay(300, 500);
+                    await page.keyboard.press('Space');
+                    await randomDelay(100, 200);
+                    await page.keyboard.press('Backspace');
+
                     captionInserted = true;
                 }
             } catch (err) {
