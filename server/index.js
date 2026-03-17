@@ -254,12 +254,14 @@ const googleMapsBot = require('./bot/google_maps');
 app.post('/api/google-maps/start', async (req, res) => {
     try {
         const config = req.body;
-        broadcastLog('Starting Google Maps Bot with query: ' + config.query);
+        const rawQueries = config.queries || config.query;
+        const queries = Array.isArray(rawQueries) ? rawQueries : [rawQueries];
+        broadcastLog('Starting Google Maps Bot with queries: ' + queries.join(' | '));
 
         // Run asynchronously
-        googleMapsBot.start(config, broadcastLog, (data) => {
+        googleMapsBot.start({ ...config, queries }, broadcastLog, (data, currentQuery) => {
             // Persist to SQLite
-            const lead = { ...data, query: config.query };
+            const lead = { ...data, query: currentQuery };
             mapsDb.saveLead(lead);
             // Send to frontend in realtime
             io.emit('maps-data', lead);
@@ -280,7 +282,52 @@ app.get('/api/maps/leads', (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const query = req.query.query || '';
-        res.json(mapsDb.getLeads({ page, limit, query }));
+        const hasWebsite = req.query.hasWebsite || 'all';
+        const minStars = parseFloat(req.query.minStars) || 0;
+        const minReviews = parseInt(req.query.minReviews) || 0;
+        res.json(mapsDb.getLeads({ page, limit, query, hasWebsite, minStars, minReviews }));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Validar números de WhatsApp em lote
+app.post('/api/maps/validate-whatsapp', async (req, res) => {
+    try {
+        const { leads, countryCode } = req.body;
+        if (!leads || !Array.isArray(leads)) return res.status(400).json({ error: 'Lista de leads requerida.' });
+        if (!waClient.isConnected) return res.status(400).json({ error: 'WhatsApp não está conectado para validar.' });
+
+        // Extrair telefones validos e preparar
+        const toValidate = [];
+        const leadMap = {};
+        for (let lead of leads) {
+            if (lead.phone) {
+                let num = lead.phone.replace(/\D/g, '');
+                if (num.startsWith('0')) num = num.substring(1);
+                if (countryCode && !(num.startsWith(countryCode) && num.length >= countryCode.length + 10)) {
+                    num = countryCode + num;
+                }
+                toValidate.push(num);
+                leadMap[num] = lead.id;
+            } else {
+                mapsDb.updateWhatsappStatus(lead.id, false);
+            }
+        }
+
+        const validResults = await waClient.validateNumbers(toValidate);
+
+        // Atualizar DB
+        let validCount = 0;
+        for (let r of validResults) {
+            const leadId = leadMap[r.original] || leadMap[r.clean];
+            if (leadId) {
+                mapsDb.updateWhatsappStatus(leadId, r.isValid);
+                if (r.isValid) validCount++;
+            }
+        }
+
+        res.json({ success: true, totalValidated: validResults.length, validCount });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

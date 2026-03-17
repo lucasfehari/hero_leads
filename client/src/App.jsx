@@ -20,6 +20,12 @@ function App() {
   const [activeTab, setActiveTab] = useState('instagram');
   const [mapsResults, setMapsResults] = useState([]);
   const [qrCode, setQrCode] = useState(null);
+  const [waPrefillNumbers, setWaPrefillNumbers] = useState('');
+
+  const navigateToWhatsApp = (numbersStr) => {
+    setActiveTab('whatsapp');
+    setWaPrefillNumbers(numbersStr);
+  };
 
   useEffect(() => {
     socket.on('connect', () => {
@@ -291,6 +297,7 @@ function App() {
                 <GoogleMapsResults
                   results={mapsResults}
                   onExport={exportMapsCSV}
+                  onOpenWhatsApp={navigateToWhatsApp}
                 />
               </div>
             </>
@@ -309,7 +316,7 @@ function App() {
                     <Settings className="w-5 h-5 text-green-400" />
                     <h2 className="font-semibold text-lg">WhatsApp Config</h2>
                   </div>
-                  <WhatsAppSender />
+                  <WhatsAppSender prefillNumbers={waPrefillNumbers} />
                 </div>
               </div>
 

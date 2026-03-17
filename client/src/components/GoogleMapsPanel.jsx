@@ -1,8 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, Search, PlayCircle, User, Plus } from 'lucide-react';
+import { MapPin, Search, PlayCircle, User, Plus, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 
 const GoogleMapsPanel = ({ onStart, onStop, isRunning }) => {
     const [query, setQuery] = useState('');
+    const [deepScrape, setDeepScrape] = useState(false);
+
+    // Dorks Builder State
+    const [isDorksOpen, setIsDorksOpen] = useState(false);
+    const [dorkNicho, setDorkNicho] = useState('');
+    const [dorkLocal, setDorkLocal] = useState('');
+    const [dorkIncluded, setDorkIncluded] = useState('');
+    const [dorkExcluded, setDorkExcluded] = useState('');
+
+    const handleAddDork = () => {
+        if (!dorkNicho && !dorkLocal) return;
+        let parts = [];
+        if (dorkNicho) parts.push(dorkNicho.trim());
+        if (dorkIncluded) parts.push(`"${dorkIncluded.trim()}"`);
+        if (dorkExcluded) parts.push(`-${dorkExcluded.trim()}`);
+        if (dorkLocal) parts.push(dorkLocal.trim());
+
+        const finalDork = parts.join(' ');
+        setQuery(prev => prev ? prev + '\n' + finalDork : finalDork);
+
+        setDorkNicho('');
+        setDorkLocal('');
+        setDorkIncluded('');
+        setDorkExcluded('');
+    };
 
     // Profile State
     const [profiles, setProfiles] = useState([]);
@@ -56,11 +81,11 @@ const GoogleMapsPanel = ({ onStart, onStop, isRunning }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        if (!query) return;
-        // Default to 'default' if no profile selected, or force selection? 
-        // Let's force selection if profiles exist, or default.
+        const queriesArray = query.split('\n').map(q => q.trim()).filter(q => q.length > 0);
+        if (queriesArray.length === 0) return;
+
         const profile = selectedProfile || 'default_guest';
-        onStart({ query, profile });
+        onStart({ queries: queriesArray, profile, deepScrape });
     };
 
     return (
@@ -116,16 +141,68 @@ const GoogleMapsPanel = ({ onStart, onStop, isRunning }) => {
 
                 <div>
                     <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
-                        <Search className="w-4 h-4 text-blue-400" /> Termo de Busca
+                        <Search className="w-4 h-4 text-blue-400" /> Termo(s) de Busca
                     </label>
-                    <input
-                        type="text"
+                    <textarea
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-all placeholder:text-slate-600"
-                        placeholder="e.g. Restaurantes em SP"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-all placeholder:text-slate-600 custom-scrollbar resize-y h-24"
+                        placeholder="Restaurantes em SP&#10;Clínicas em Goiânia&#10;(Uma busca por linha)"
                         disabled={isRunning}
                     />
+                </div>
+
+                <div className="flex items-center gap-3 bg-slate-800/50 p-3 rounded-xl border border-white/5">
+                    <input
+                        type="checkbox"
+                        id="deepScrapeCheckbox"
+                        checked={deepScrape}
+                        onChange={(e) => setDeepScrape(e.target.checked)}
+                        className="w-4 h-4 rounded text-orange-500 bg-slate-700 border-slate-600 focus:ring-orange-500 focus:ring-offset-slate-900"
+                    />
+                    <label htmlFor="deepScrapeCheckbox" className="text-sm font-medium text-slate-300 cursor-pointer">
+                        <span className="text-orange-400 font-bold">Deep Scrape</span> (Extrair E-mail e Instagram dos Sites)
+                        <p className="text-xs text-slate-500 font-normal">Aumenta o tempo da extração.</p>
+                    </label>
+                </div>
+
+                {/* Dorks Builder */}
+                <div className="bg-slate-800/20 rounded-xl border border-white/5 overflow-hidden">
+                    <button
+                        className="w-full flex items-center justify-between p-3 text-left hover:bg-white/5 transition-colors"
+                        onClick={() => setIsDorksOpen(!isDorksOpen)}
+                    >
+                        <div className="flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-emerald-400" />
+                            <span className="font-semibold text-white text-sm">Busca Avançada (Construtor Dorks)</span>
+                        </div>
+                        {isDorksOpen ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                    </button>
+                    {isDorksOpen && (
+                        <div className="p-4 border-t border-white/5 space-y-4 bg-slate-900/30">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">O que busca? (Nicho)</label>
+                                    <input type="text" placeholder="Ex: Dentistas" className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500/50" value={dorkNicho} onChange={e => setDorkNicho(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">Onde? (Local)</label>
+                                    <input type="text" placeholder="Ex: São Paulo" className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500/50" value={dorkLocal} onChange={e => setDorkLocal(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">Obrigatório ("termo")</label>
+                                    <input type="text" placeholder="Ex: instagram" className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500/50" value={dorkIncluded} onChange={e => setDorkIncluded(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">Excluir (-termo)</label>
+                                    <input type="text" placeholder="Ex: fechado" className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500/50" value={dorkExcluded} onChange={e => setDorkExcluded(e.target.value)} />
+                                </div>
+                            </div>
+                            <button onClick={handleAddDork} disabled={!dorkNicho && !dorkLocal} className="w-full py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors">
+                                + Gerar e Adicionar à Lista
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="pt-2">

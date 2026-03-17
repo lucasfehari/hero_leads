@@ -43,7 +43,7 @@ const NumInput = ({ label, value, onChange, unit, min = 1 }) => (
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
-const WhatsAppSender = () => {
+const WhatsAppSender = ({ prefillNumbers }) => {
     // Session
     const [sessions, setSessions] = useState([]);
     const [currentSession, setCurrentSession] = useState('default');
@@ -155,13 +155,17 @@ const WhatsAppSender = () => {
 
         loadOptOutConfig();
 
+        if (prefillNumbers) {
+            setNumbers(prefillNumbers);
+        }
+
         return () => {
             clearInterval(warmupInterval);
             socket.off('wa-queue-status');
             socket.off('wa-status');
             socket.off('wa-optout');
         };
-    }, [loadSessions, loadWarmup, loadOptOutConfig]);
+    }, [loadSessions, loadWarmup, loadOptOutConfig, prefillNumbers]);
 
     const statusToEntry = (d) => {
         const ts = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });

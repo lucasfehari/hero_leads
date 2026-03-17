@@ -50,27 +50,59 @@ class GoogleMapsBot {
             // Aceitar cookies/consentimento se aparecer
             await this.handleConsent();
 
-            // Buscar
-            this.log(`Buscando por: "${config.query}"...`);
-            await this.doSearch(config.query);
+            const queries = config.queries || [config.query];
 
-            // Aguardar resultados carregarem
-            this.log('Aguardando resultados...');
-            await wait(3000);
+            for (let i = 0; i < queries.length; i++) {
+                if (!this.isRunning) break;
 
-            try {
-                await this.page.waitForSelector('div[role="feed"]', { timeout: 12000 });
-            } catch (e) {
-                this.log('Feed de resultados não apareceu. Pode ser resultado único ou sem resultados.', 'warning');
+                const currentQuery = queries[i];
+                this.log(`[${i + 1}/${queries.length}] Buscando por: "${currentQuery}"...`);
+
+                // Limpar caixa de busca se não for a primeira iteração
+                if (i > 0) {
+                    await this.clearSearchBox();
+                }
+
+                await this.doSearch(currentQuery);
+
+                // Aguardar resultados carregarem
+                this.log('Aguardando resultados...');
+                await wait(3000);
+
+                try {
+                    await this.page.waitForSelector('div[role="feed"]', { timeout: 12000 });
+                } catch (e) {
+                    this.log('Feed de resultados não apareceu. Pode ser resultado único ou sem resultados.', 'warning');
+                }
+
+                // Iniciar scraping
+                await this.scrapeResults(currentQuery);
+
+                this.log(`Fim da extração para "${currentQuery}".`);
+                await wait(2000);
             }
-
-            // Iniciar scraping
-            await this.scrapeResults();
 
         } catch (error) {
             this.log(`Erro: ${error.message}`, 'error');
+        } finally {
             await this.stop();
         }
+    }
+
+    async clearSearchBox() {
+        try {
+            const searchBox = await this.page.$('#searchboxinput') || await this.page.$('input[name="q"]');
+            if (searchBox) {
+                const clearBtn = await this.page.$('button[aria-label="Clear context"]');
+                if (clearBtn) {
+                    await clearBtn.click();
+                } else {
+                    await this.page.click('#searchboxinput', { clickCount: 3 });
+                    await this.page.keyboard.press('Backspace');
+                }
+                await wait(1000);
+            }
+        } catch (e) { }
     }
 
     async handleConsent() {
@@ -124,7 +156,7 @@ class GoogleMapsBot {
         await this.page.keyboard.press('Enter');
     }
 
-    async scrapeResults() {
+    async scrapeResults(currentQuery) {
         this.log('Iniciando extração de leads...');
         const processed = new Set();
         let unchangedCount = 0;
@@ -155,12 +187,38 @@ class GoogleMapsBot {
                     await item.click();
                     await wait(2500); // Esperar o painel lateral carregar
 
-                    const details = await this.extractDetails();
+                    let details = await this.extractDetails();
 
                     if (details && details.name) {
+
+                        // Deep Scrape
+                        if (this.config && this.config.deepScrape && details.website) {
+                            try {
+                                this.log(`🔍 [Deep Scrape] Investigando site do lead: ${details.name}`);
+                                const newPage = await this.page.browser().newPage();
+                                await newPage.goto(details.website, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                                const html = await newPage.content();
+
+                                // Regex email preventivo para evitar coisas de css em domínios falsos
+                                const rawEmail = html.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/i);
+                                if (rawEmail && !rawEmail[1].endsWith('.png') && !rawEmail[1].endsWith('.jpg') && !rawEmail[1].endsWith('.webp')) {
+                                    details.email = rawEmail[1];
+                                }
+
+                                const igMatch = html.match(/(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)/i);
+                                if (igMatch && igMatch[1] !== 'explore' && igMatch[1] !== 'p') {
+                                    details.instagram = igMatch[1];
+                                }
+
+                                await newPage.close();
+                            } catch (e) {
+                                this.log(`⚠️ Falha no Deep Scrape de ${details.name}: ` + e.message, 'warning');
+                            }
+                        }
+
                         totalFound++;
-                        this.log(`[${totalFound}] ${details.name} | ${details.phone || 'S/Telefone'} | ${details.website || 'S/Site'}`);
-                        if (this.dataCallback) this.dataCallback(details);
+                        this.log(`[${totalFound}] ${details.name} | ${details.phone || 'S/Telefone'} | ${details.email ? '📧 ' + details.email : 'S/Email'} | ${details.instagram ? '📸 @' + details.instagram : 'S/Insta'}`);
+                        if (this.dataCallback) this.dataCallback(details, currentQuery);
                     }
 
                     await wait(800);
@@ -181,7 +239,7 @@ class GoogleMapsBot {
             if (!scrolled) {
                 unchangedCount++;
                 if (unchangedCount >= 3) {
-                    this.log(`Fim dos resultados. Total extraído: ${totalFound} leads.`);
+                    this.log(`Fim dos resultados da página para esta busca. Total extraído: ${totalFound} leads.`);
                     break;
                 }
                 await wait(1500);
@@ -190,17 +248,28 @@ class GoogleMapsBot {
                 await wait(2000);
             }
         }
-
-        await this.stop();
     }
 
     async extractDetails() {
         return await this.page.evaluate(() => {
             const res = {};
+            // Nome do local no painel lateral
+            // A classe 'DUwDvf' ou 'lfPIob' é frequentemente usada pelo Maps para o título da empresa no painel de detalhes.
+            // Se não encontrar, fazemos um fallback seguro.
+            const titleEl = document.querySelector('h1.DUwDvf, h1.lfPIob, h1.lfPIob');
 
-            // Nome
-            const h1 = document.querySelector('h1');
-            res.name = h1 ? h1.innerText.trim() : '';
+            if (titleEl) {
+                res.name = titleEl.innerText.trim();
+            } else {
+                // Fallback: Pegar H1 que não seja Resultados e que esteja dentro do painel
+                const h1s = Array.from(document.querySelectorAll('h1'));
+                const validH1s = h1s.filter(h => {
+                    const text = h.innerText.trim();
+                    return text && !text.match(/Resultados|Results|pesquisa/i);
+                });
+                res.name = validH1s.length > 0 ? validH1s[validH1s.length - 1].innerText.trim() : '';
+            }
+
             if (!res.name) return null;
 
             // Telefone via data-item-id
@@ -232,7 +301,16 @@ class GoogleMapsBot {
 
             // Categoria / Rating (visíveis no topo do painel)
             const ratingEl = document.querySelector('div.fontBodyMedium span[aria-label]');
-            if (ratingEl) res.rating = ratingEl.getAttribute('aria-label') || ratingEl.innerText.trim();
+            if (ratingEl) {
+                res.rating = ratingEl.getAttribute('aria-label') || ratingEl.innerText.trim();
+
+                // Extrair estrelas e avaliações via Regex
+                const starsMatch = res.rating.match(/([\d,]+)\s*estrelas?/i);
+                if (starsMatch) res.rating_stars = parseFloat(starsMatch[1].replace(',', '.'));
+
+                const reviewsMatch = res.rating.match(/([\d\.]+)\s*coment[áa]rios?/i);
+                if (reviewsMatch) res.review_count = parseInt(reviewsMatch[1].replace(/\./g, ''));
+            }
 
             return res;
         });

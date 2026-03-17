@@ -261,6 +261,25 @@ class WhatsAppService {
         this.queue.addToQueue(numbers, messagesArray);
         return { success: true, message: 'Campaign started' };
     }
+
+    async validateNumbers(numbers) {
+        if (!this.isConnected) throw new Error('WhatsApp not connected');
+        const results = [];
+        for (const num of numbers) {
+            try {
+                let clean = num.replace(/\D/g, '');
+                if (clean.startsWith('0')) clean = clean.substring(1);
+                // Check if number exists on WA
+                const numberId = await this.client.getNumberId(clean);
+                results.push({ original: num, clean, isValid: !!numberId });
+            } catch (e) {
+                results.push({ original: num, clean: num, isValid: false });
+            }
+            // Small delay to avoid flooding rate limits
+            await new Promise(r => setTimeout(r, 600));
+        }
+        return results;
+    }
 }
 
 let instance = null;

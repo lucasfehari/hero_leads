@@ -1,22 +1,30 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { MapPin, Download, Phone, Globe, Map, Trash2, RefreshCw, Search, Star, Database } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { MapPin, Download, Phone, Globe, Map, Trash2, RefreshCw, Search, Star, Database, ChevronDown, CheckCircle2, XCircle, Send, Mail, Instagram, ArrowRight } from 'lucide-react';
 
 const PAGE_SIZE = 20;
 
-const GoogleMapsResults = ({ results: liveResults, onExport }) => {
+const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) => {
     // ── DB State (leads persistidos) ──────────────────────────────────────────
     const [dbLeads, setDbLeads] = useState([]);
     const [dbTotal, setDbTotal] = useState(0);
     const [dbPages, setDbPages] = useState(1);
     const [dbPage, setDbPage] = useState(1);
     const [filterQuery, setFilterQuery] = useState('');
+    const [websiteFilter, setWebsiteFilter] = useState('all');
+    const [countryCode, setCountryCode] = useState('55');
+    const [minStars, setMinStars] = useState('');
+    const [minReviews, setMinReviews] = useState('');
+    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isValidating, setIsValidating] = useState(false);
     const [activeTab, setActiveTab] = useState('db'); // 'live' | 'db'
 
-    const fetchDbLeads = useCallback(async (p = 1, q = filterQuery) => {
+    const fetchDbLeads = useCallback(async (p = 1, q = filterQuery, w = websiteFilter, ms = minStars, mr = minReviews) => {
         setIsLoading(true);
         try {
-            const params = new URLSearchParams({ page: p, limit: PAGE_SIZE, query: q });
+            const params = new URLSearchParams({
+                page: p, limit: PAGE_SIZE, query: q, hasWebsite: w, minStars: ms || 0, minReviews: mr || 0
+            });
             const res = await fetch(`http://localhost:3000/api/maps/leads?${params}`);
             const data = await res.json();
             setDbLeads(data.leads || []);
@@ -27,7 +35,7 @@ const GoogleMapsResults = ({ results: liveResults, onExport }) => {
             console.error('Error fetching leads:', e);
         }
         setIsLoading(false);
-    }, [filterQuery]);
+    }, [filterQuery, websiteFilter, minStars, minReviews]);
 
     useEffect(() => { fetchDbLeads(1); }, []);
 
@@ -54,28 +62,112 @@ const GoogleMapsResults = ({ results: liveResults, onExport }) => {
         } catch (e) { alert('Erro: ' + e.message); }
     };
 
-    const handleExportDB = () => {
+    const handleExport = (type) => {
         if (dbLeads.length === 0) return;
-        // Pegar todos (sem paginação) via fetch e exportar
-        fetch(`http://localhost:3000/api/maps/leads?page=1&limit=99999&query=${encodeURIComponent(filterQuery)}`)
+        setIsExportMenuOpen(false);
+        const params = new URLSearchParams({
+            page: 1, limit: 99999, query: filterQuery, hasWebsite: websiteFilter, minStars: minStars || 0, minReviews: minReviews || 0
+        });
+
+        fetch(`http://localhost:3000/api/maps/leads?${params}`)
             .then(r => r.json())
             .then(data => {
-                const headers = ['ID', 'Nome', 'Telefone', 'Endereço', 'Website', 'Busca', 'Data'];
-                const csv = [
-                    headers.join(','),
-                    ...(data.leads || []).map(r =>
-                        `"${r.id}","${r.name || ''}","${r.phone || ''}","${r.address || ''}","${r.website || ''}","${r.query || ''}","${r.scraped_at || ''}"`
-                    )
-                ].join('\n');
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const leads = data.leads || [];
+                let content = '';
+                let filename = '';
+                let mimeType = '';
+
+                const formatPhone = (phone) => {
+                    if (!phone) return '';
+                    let cleaned = phone.replace(/\D/g, '');
+                    if (cleaned.startsWith('0')) {
+                        cleaned = cleaned.substring(1);
+                    }
+                    if (countryCode) {
+                        if (!(cleaned.startsWith(countryCode) && cleaned.length >= countryCode.length + 10)) {
+                            cleaned = countryCode + cleaned;
+                        }
+                    }
+                    return cleaned;
+                };
+
+                if (type === 'csv_full') {
+                    const headers = ['ID', 'Nome', 'Telefone', 'Endereço', 'Website', 'Busca', 'Data'];
+                    content = [
+                        headers.join(','),
+                        ...leads.map(r => `"${r.id}","${r.name || ''}","${r.phone ? formatPhone(r.phone) : ''}","${r.address || ''}","${r.website || ''}","${r.query || ''}","${r.scraped_at || ''}"`)
+                    ].join('\n');
+                    filename = `leads_maps_completo_${Date.now()}.csv`;
+                    mimeType = 'text/csv;charset=utf-8;';
+                } else if (type === 'csv_clean') {
+                    const headers = ['Nome', 'Telefone', 'Website'];
+                    content = [
+                        headers.join(','),
+                        ...leads.map(r => `"${r.name || ''}","${r.phone ? formatPhone(r.phone) : ''}","${r.website || ''}"`)
+                    ].join('\n');
+                    filename = `leads_maps_lousa_${Date.now()}.csv`;
+                    mimeType = 'text/csv;charset=utf-8;';
+                } else if (type === 'txt_numbers') {
+                    content = leads.filter(r => r.phone).map(r => {
+                        return formatPhone(r.phone);
+                    }).join('\n');
+                    filename = `numeros_maps_${Date.now()}.txt`;
+                    mimeType = 'text/plain;charset=utf-8;';
+                }
+
+                const blob = new Blob([content], { type: mimeType });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `leads_maps_${Date.now()}.csv`;
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
             });
+    };
+
+    const handleValidateWhatsapp = async () => {
+        if (dbLeads.length === 0) return alert('Nenhum lead para validar na página atual.');
+        setIsValidating(true);
+        try {
+            const res = await fetch('http://localhost:3000/api/maps/validate-whatsapp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ leads: dbLeads, countryCode })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(`Validação concluída: ${data.validCount} de ${data.totalValidated} números têm WhatsApp.`);
+                fetchDbLeads(dbPage);
+            } else {
+                alert('Erro: ' + data.error);
+            }
+        } catch (e) { alert('Erro: ' + e.message); }
+        setIsValidating(false);
+    };
+
+    const handleSendToCampaign = () => {
+        if (dbLeads.length === 0) return alert('Sem leads para campanha.');
+
+        const formatPhone = (phone) => {
+            if (!phone) return '';
+            let cleaned = phone.replace(/\D/g, '');
+            if (cleaned.startsWith('0')) {
+                cleaned = cleaned.substring(1);
+            }
+            if (countryCode) {
+                if (!(cleaned.startsWith(countryCode) && cleaned.length >= countryCode.length + 10)) {
+                    cleaned = countryCode + cleaned;
+                }
+            }
+            return cleaned;
+        };
+
+        const validPhones = dbLeads.filter(l => l.whatsapp_valid !== 0 && l.phone).map(l => formatPhone(l.phone));
+
+        if (validPhones.length === 0) return alert('Nenhum telefone encontrado nos filtros!');
+
+        onOpenWhatsApp(validPhones.join('\n'));
     };
 
     const LeadCard = ({ lead, onDelete }) => (
@@ -99,6 +191,8 @@ const GoogleMapsResults = ({ results: liveResults, onExport }) => {
                     {lead.phone && (
                         <a href={`tel:${lead.phone}`} className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">
                             <Phone className="w-3 h-3" /> {lead.phone}
+                            {lead.whatsapp_valid === 1 && <CheckCircle2 className="w-3.5 h-3.5 text-green-400 ml-1" title="WhatsApp Válido" />}
+                            {lead.whatsapp_valid === 0 && <XCircle className="w-3.5 h-3.5 text-red-500 ml-1" title="Telefone Fixo / Sem WhatsApp" />}
                         </a>
                     )}
                     {lead.website && (
@@ -106,6 +200,12 @@ const GoogleMapsResults = ({ results: liveResults, onExport }) => {
                             className="flex items-center gap-1.5 text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded hover:underline">
                             <Globe className="w-3 h-3" /> Site
                         </a>
+                    )}
+                    {(lead.email || lead.instagram) && (
+                        <div className="flex items-center gap-2 mt-1 justify-end">
+                            {lead.email && <a href={`mailto:${lead.email}`} className="text-xs text-slate-300 bg-slate-800 px-2 py-1 rounded flex items-center gap-1 hover:bg-slate-700"><Mail className="w-3 h-3 text-orange-400" /> {lead.email}</a>}
+                            {lead.instagram && <a href={`https://instagram.com/${lead.instagram}`} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-300 bg-slate-800 px-2 py-1 rounded flex items-center gap-1 hover:bg-slate-700"><Instagram className="w-3 h-3 text-pink-400" /> @{lead.instagram}</a>}
+                        </div>
                     )}
                     {onDelete && (
                         <button onClick={onDelete}
@@ -132,11 +232,21 @@ const GoogleMapsResults = ({ results: liveResults, onExport }) => {
                         <span className="text-xs bg-red-900/40 text-red-400 px-2 py-0.5 rounded-full">{liveResults.length} ao vivo</span>
                     )}
                 </div>
-                <div className="flex items-center gap-2">
-                    <button onClick={handleExportDB}
-                        className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border border-slate-700">
-                        <Download className="w-3 h-3" /> CSV
-                    </button>
+                <div className="flex items-center gap-2 relative">
+                    <div className="relative">
+                        <button onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                            className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border border-slate-700">
+                            <Download className="w-3 h-3" /> Exportar <ChevronDown className="w-3 h-3" />
+                        </button>
+                        {isExportMenuOpen && (
+                            <div className="absolute top-full right-0 mt-1 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 py-1"
+                                onMouseLeave={() => setIsExportMenuOpen(false)}>
+                                <button onClick={() => handleExport('csv_full')} className="w-full text-left px-4 py-2 text-xs text-white hover:bg-slate-700 transition-colors">CSV Completo</button>
+                                <button onClick={() => handleExport('csv_clean')} className="w-full text-left px-4 py-2 text-xs text-white hover:bg-slate-700 transition-colors">Lousa (Nome, Núm, Site)</button>
+                                <button onClick={() => handleExport('txt_numbers')} className="w-full text-left px-4 py-2 text-xs text-white hover:bg-slate-700 transition-colors">TXT (Apenas Números)</button>
+                            </div>
+                        )}
+                    </div>
                     {activeTab === 'db' && (
                         <>
                             <button onClick={() => fetchDbLeads(dbPage)}
@@ -169,16 +279,66 @@ const GoogleMapsResults = ({ results: liveResults, onExport }) => {
             {/* DB Tab */}
             {activeTab === 'db' && (
                 <>
-                    <div className="mb-3 flex-shrink-0">
-                        <div className="relative">
+                    <div className="mb-3 flex-shrink-0 flex flex-wrap gap-2">
+                        <div className="relative flex-1 min-w-[150px]">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
                             <input
                                 className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-red-500"
                                 placeholder="Filtrar por busca..."
                                 value={filterQuery}
                                 onChange={e => setFilterQuery(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && fetchDbLeads(1, filterQuery)}
+                                onKeyDown={e => e.key === 'Enter' && fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
                             />
+                        </div>
+                        <input
+                            type="number"
+                            placeholder="Mín. Estrelas"
+                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500 w-[110px]"
+                            value={minStars}
+                            onChange={(e) => setMinStars(e.target.value)}
+                            onBlur={() => fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
+                            onKeyDown={e => e.key === 'Enter' && fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
+                        />
+                        <input
+                            type="number"
+                            placeholder="Mín. Avaliações"
+                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500 w-[120px]"
+                            value={minReviews}
+                            onChange={(e) => setMinReviews(e.target.value)}
+                            onBlur={() => fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
+                            onKeyDown={e => e.key === 'Enter' && fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
+                        />
+                        <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg px-2 text-sm text-white focus-within:border-red-500" title="Código do País para Adicionar na Exportação">
+                            <span className="text-slate-500 text-xs">+</span>
+                            <input
+                                className="bg-transparent w-8 py-2 focus:outline-none text-center"
+                                value={countryCode}
+                                onChange={e => setCountryCode(e.target.value.replace(/\D/g, ''))}
+                                placeholder="55"
+                            />
+                        </div>
+                        <select
+                            value={websiteFilter}
+                            onChange={(e) => {
+                                setWebsiteFilter(e.target.value);
+                                fetchDbLeads(1, filterQuery, e.target.value, minStars, minReviews);
+                            }}
+                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-red-500 appearance-none max-w-[120px] cursor-pointer"
+                        >
+                            <option value="all">Site: Todos</option>
+                            <option value="yes">Com Site</option>
+                            <option value="no">Sem Site</option>
+                        </select>
+
+                        <div className="flex items-center gap-2 border-l border-white/10 pl-2">
+                            <button onClick={handleValidateWhatsapp} disabled={isValidating}
+                                className={`text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border border-slate-700 ${isValidating ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                {isValidating ? <RefreshCw className="w-3 h-3 animate-spin text-slate-400" /> : <CheckCircle2 className="w-3 h-3 text-green-400" />} Validar WA (Página)
+                            </button>
+                            <button onClick={handleSendToCampaign}
+                                className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-900/20">
+                                Abrir no WhatsApp <ArrowRight className="w-3 h-3" />
+                            </button>
                         </div>
                     </div>
 
