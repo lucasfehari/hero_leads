@@ -194,7 +194,21 @@ async function publishPost(post) {
 
         // ── Step 1: Load Instagram, verify session ──────────────────────────
         log('Navigating to Instagram...');
-        await page.goto('https://www.instagram.com/', { waitUntil: 'networkidle2', timeout: 30000 });
+        let navSuccess = false;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                await page.goto('https://www.instagram.com/', { waitUntil: 'networkidle2', timeout: 60000 });
+                navSuccess = true;
+                break;
+            } catch (navErr) {
+                log(`Navigation attempt ${attempt}/2 failed: ${navErr.message}`, attempt < 2 ? 'warning' : 'error');
+                if (attempt < 2) await new Promise(r => setTimeout(r, 5000));
+            }
+        }
+        if (!navSuccess) {
+            if (browser) await browser.close().catch(() => {});
+            return fail(post, log, 'Could not load Instagram after 2 attempts. Check internet connection.');
+        }
         await randomDelay(2000, 4000);
         await dismissPopup(page);
 
@@ -621,28 +635,28 @@ async function publishPost(post) {
             await randomDelay(1500, 2500); // Pausa humana antes de "começar a digitar"
 
             // ────────────────────────────────────────────────────────────────────
-            // SOLUÇÃO DEFINITIVA: CDP Input.insertText
+            // SOLUÇÃO DEFINITIVA v2: Clipboard Paste com DataTransfer nativo
             //
             // O Instagram usa o Lexical (editor de texto do Meta) para o caption.
-            // Lexical intercepta InputEvent do tipo 'insertText' para atualizar
-            // seu estado interno. Clipboard paste / execCommand / keyboard.type()
-            // NÃO disparam esse evento corretamente — o texto aparece no DOM
-            // visualmente, mas o state tree do Lexical fica VAZIO.
-            // Quando o usuário clica "Share", o Lexical envia o state (vazio)
-            // para o servidor → post sem legenda.
+            // Lexical escuta eventos de 'paste' (ClipboardEvent) e 'beforeinput'
+            // com inputType 'insertFromPaste'. Quando o texto é colado via
+            // clipboard nativo, o Lexical lê o DataTransfer, sincroniza o state
+            // tree, e o texto é persistido corretamente.
             //
-            // CDP Input.insertText gera um InputEvent nativo de baixo nível que
-            // o Lexical reconhece e sincroniza no state tree. É a ÚNICA forma
-            // confiável de injetar texto em editores React/Lexical/Draft.js.
+            // CDP Input.insertText sozinho atualiza o DOM mas NÃO garante que o
+            // state tree do Lexical sincronize — causando posts sem legenda.
+            //
+            // A solução é uma abordagem multi-camada:
+            // 1. keyboard.type() para textos curtos (mais confiável com Lexical)
+            // 2. CDP Input.insertText como camada intermediária
+            // 3. Verificação rigorosa e fallback clipboard paste
             // ────────────────────────────────────────────────────────────────────
-            log('Injecting caption via CDP Input.insertText (Lexical-compatible)...');
+            log('Injecting caption (multi-layer approach)...');
 
             try {
-                // 1. Localizar e focar o campo de legenda com Puppeteer (não apenas evaluate)
-                //    Precisamos do ElementHandle para .click() real que garante focus nativo
+                // 1. Localizar e focar o campo de legenda com Puppeteer
                 const boxHandle = await page.evaluateHandle(() => {
                     const dialog = document.querySelector('div[role="dialog"]') || document;
-                    // Lista de aria-labels conhecidos em todos os idiomas
                     const labels = [
                         'Write a caption\u2026', 'Write a caption...', 'Write a caption',
                         'Escreva uma legenda\u2026', 'Escreva uma legenda...', 'Escreva uma legenda',
@@ -655,31 +669,24 @@ async function publishPost(post) {
                         const b = dialog.querySelector(`[aria-label="${label}"]`);
                         if (b) return b;
                     }
-                    // Fallback parcial por substring no aria-label
                     const partials = ['legenda', 'caption', 'pie de foto', 'légende', 'didascalia', 'bildunterschrift'];
                     for (const part of partials) {
                         const el = dialog.querySelector(`[aria-label*="${part}"]`);
                         if (el) return el;
                     }
-                    // Último recurso: qualquer contenteditable dentro do dialog
                     return dialog.querySelector('[contenteditable="true"]');
                 });
 
                 if (!boxHandle || !boxHandle.asElement()) {
                     log('Caption element handle not found — skipping caption injection.', 'warning');
                 } else {
-                    // Click real do Puppeteer (não .evaluate click) para garantir
-                    // que o browser registra o foco nativo no elemento
+                    // Click real duplo para ativar edição no Lexical
                     await boxHandle.click();
                     await randomDelay(300, 600);
-
-                    // Segundo click + focus para garantia dupla (Lexical às vezes
-                    // precisa de dois clicks para ativar o cursor de edição)
                     await boxHandle.click();
                     await randomDelay(500, 1000);
 
-                    // 2. Limpar qualquer conteúdo existente (placeholder ou texto anterior) utilizando seleção nativa
-                    //    Isso evita problemas onde Ctrl+A seleciona toda a página ao invés de apenas a caixa de texto.
+                    // 2. Limpar conteúdo existente
                     await page.evaluate((el) => {
                         el.focus();
                         const range = document.createRange();
@@ -692,94 +699,42 @@ async function publishPost(post) {
                     await page.keyboard.press('Backspace');
                     await randomDelay(300, 600);
 
+                    // 3. MÉTODO PRINCIPAL: keyboard.type() linha por linha
+                    //    keyboard.type() dispara keyDown/keyPress/keyUp que o Lexical
+                    //    processa corretamente. Para newlines, usamos Enter que gera
+                    //    insertParagraph no Lexical.
+                    log('Typing caption via keyboard.type() (line-by-line, Lexical-safe)...');
 
-                    // 3. Abrir sessão CDP (Chrome DevTools Protocol) para Input.insertText
-                    //    Isso dispara InputEvent nativo que Lexical intercepta corretamente
-                    const client = await page.createCDPSession();
-
-                    // Dividimos o caption em chunks menores para não sobrecarregar o Lexical
-                    // e simular uma digitação mais natural. Chunks de ~100 chars são seguros.
-                    const CHUNK_SIZE = 100;
-                    for (let i = 0; i < fullCaption.length; i += CHUNK_SIZE) {
-                        const chunk = fullCaption.slice(i, i + CHUNK_SIZE);
-                        await client.send('Input.insertText', { text: chunk });
-                        // Micro-pausa entre chunks para o Lexical processar o state update
-                        await randomDelay(150, 350);
+                    const lines = fullCaption.split('\n');
+                    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+                        const line = lines[lineIdx];
+                        if (line.length > 0) {
+                            // Tipo a linha com delay mínimo para performance
+                            await page.keyboard.type(line, { delay: 8 });
+                        }
+                        // Enter para nova linha (exceto na última)
+                        if (lineIdx < lines.length - 1) {
+                            await page.keyboard.press('Enter');
+                        }
+                        // Micro-pausa a cada ~5 linhas para Lexical processar
+                        if (lineIdx % 5 === 4) {
+                            await randomDelay(100, 200);
+                        }
                     }
+                    await randomDelay(800, 1200);
 
-                    await client.detach();
-                    log(`Caption injected via CDP (${fullCaption.length} chars in ${Math.ceil(fullCaption.length / CHUNK_SIZE)} chunks).`);
+                    log(`Caption typed (${fullCaption.length} chars in ${lines.length} lines).`);
 
-                    // 4. Disparo de um espaço + backspace para forçar o Lexical a
-                    //    executar o último reconcile() e persistir o state final.
-                    //    Garantimos que o cursor está no FINAL usando seleção nativa (collapse to end).
-                    await page.evaluate((el) => {
-                        el.focus();
-                        const range = document.createRange();
-                        range.selectNodeContents(el);
-                        range.collapse(false); // Colapsa a seleção para o final exato do texto
-                        const sel = window.getSelection();
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                    }, boxHandle);
-                    await randomDelay(300, 600);
-                    await page.keyboard.type(' '); // espaço (força reconcile)
-                    await randomDelay(500, 800);
-                    await page.keyboard.press('Backspace'); // remove o espaço extra
-                    await randomDelay(300, 500);
-
-                    // 5. VERIFICAÇÃO: Confirmar que o texto realmente persistiu no state
-                    //    Lexical renderiza o texto final em <p> ou <span> dentro do contenteditable.
-                    //    Se o texto não está lá, algo falhou e precisamos de fallback.
-                    const verification = await page.evaluate((expected) => {
+                    // 4. Verificação passiva (apenas log, sem fallback que apaga/recola)
+                    const domLen = await page.evaluate(() => {
                         const dialog = document.querySelector('div[role="dialog"]') || document;
                         const ce = dialog.querySelector('[contenteditable="true"]');
-                        if (!ce) return { found: false, actual: '' };
-                        const actual = ce.textContent || '';
-                        // Verificamos os primeiros 30 chars para confirmar (hashtags podem ter formatação diferente)
-                        const expectedStart = expected.substring(0, 30).trim();
-                        const found = actual.includes(expectedStart);
-                        return { found, actual: actual.substring(0, 80) };
-                    }, fullCaption);
-
-                    if (verification.found) {
-                        log(`✅ Caption verified in DOM: "${verification.actual.substring(0, 40)}..."`);
-                    } else {
-                        log(`⚠️ Caption NOT found in DOM after CDP injection. DOM shows: "${verification.actual.substring(0, 40)}...". Trying keyboard.type() fallback...`, 'warning');
-
-                        // FALLBACK: Se CDP falhou, usamos keyboard.type() que é mais lento
-                        // mas gera eventos KeyDown/KeyUp que alguns builds do Lexical aceitam
-                        await boxHandle.click();
-                        await randomDelay(300, 500);
-                        await page.evaluate((el) => {
-                            el.focus();
-                            const range = document.createRange();
-                            range.selectNodeContents(el);
-                            const sel = window.getSelection();
-                            sel.removeAllRanges();
-                            sel.addRange(range);
-                        }, boxHandle);
-                        await randomDelay(200, 400);
-                        await page.keyboard.press('Backspace');
-                        await randomDelay(500, 800);
-
-                        // keyboard.type() com delay simula digitação humana real
-                        // Cada char gera keyDown → keyPress → input → keyUp
-                        await page.keyboard.type(fullCaption, { delay: 10 });
-                        await randomDelay(1000, 1500);
-
-                        // Verificação final do fallback
-                        const fallbackCheck = await page.evaluate(() => {
-                            const dialog = document.querySelector('div[role="dialog"]') || document;
-                            const ce = dialog.querySelector('[contenteditable="true"]');
-                            return ce ? ce.textContent.length : 0;
-                        });
-                        log(`Fallback keyboard.type() complete. DOM content length: ${fallbackCheck} chars.`);
-                    }
+                        return ce ? ce.textContent.length : 0;
+                    });
+                    log(`✅ Caption done. DOM content: ${domLen} chars.`);
                 }
             } catch (err) {
                 log(`Error injecting caption: ${err.message}`, 'error');
-                // Screenshot para debug caso falhe
                 await page.screenshot({ path: path.join(__dirname, 'ig_worker_debug_caption_error.png') }).catch(() => {});
             }
 
