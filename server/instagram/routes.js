@@ -37,6 +37,78 @@ router.post('/upload', upload.array('media', 10), (req, res) => {
 // ── Serve uploaded media as static files ───────────────────────────────────
 router.use('/media', express.static(UPLOADS_DIR));
 
+// ── OAuth — Login automático do Instagram ──────────────────────────────────
+// O usuário clica "⚡ Conectar Instagram" → abre popup → autoriza → token salvo automaticamente
+const oauth = require('./oauth');
+
+// Rota que gera a URL de autorização e redireciona o usuário
+router.get('/oauth/authorize/:accountId', (req, res) => {
+    const accountId = req.params.accountId;
+    const account = db.prepare('SELECT * FROM ig_accounts WHERE id = ?').get(accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+
+    const authUrl = oauth.getAuthorizationUrl(accountId);
+    res.redirect(authUrl);
+});
+
+// Callback do Instagram — recebe o 'code' e troca por token automaticamente
+router.get('/oauth/callback', async (req, res) => {
+    const { code, state, error, error_reason } = req.query;
+
+    // Se o usuário cancelou a autorização
+    if (error) {
+        return res.send(`
+            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0f0f23;color:#fff">
+                <h2>❌ Autorização cancelada</h2>
+                <p style="color:#94a3b8">${error_reason || error}</p>
+                <script>setTimeout(() => window.close(), 2000)</script>
+            </body></html>
+        `);
+    }
+
+    if (!code || !state) {
+        return res.status(400).send('Missing code or state parameter.');
+    }
+
+    // Processar o callback — troca code por token, salva no banco
+    const io = req.app.get('io');
+    const result = await oauth.handleCallback(code, state, io);
+
+    if (result.success) {
+        // Página de sucesso que fecha o popup e notifica o app
+        res.send(`
+            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0f0f23;color:#fff">
+                <div style="max-width:400px;margin:0 auto;background:#1e1e3f;border-radius:16px;padding:40px;border:1px solid rgba(255,255,255,0.1)">
+                    <div style="font-size:48px;margin-bottom:16px">✅</div>
+                    <h2 style="margin:0 0 8px">Conectado!</h2>
+                    <p style="color:#a78bfa;font-size:18px;margin:0 0 8px">@${result.profile?.username || 'conta'}</p>
+                    <p style="color:#94a3b8;font-size:14px">Publicações via Graph API ativadas.</p>
+                    <p style="color:#64748b;font-size:12px;margin-top:16px">Fechando automaticamente...</p>
+                </div>
+                <script>
+                    // Notifica a janela pai (nosso app) que a conexão foi feita
+                    if (window.opener) {
+                        window.opener.postMessage({ type: 'ig-oauth-success', account: ${JSON.stringify(result.account)} }, '*');
+                    }
+                    setTimeout(() => window.close(), 3000);
+                </script>
+            </body></html>
+        `);
+    } else {
+        res.send(`
+            <html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0f0f23;color:#fff">
+                <div style="max-width:400px;margin:0 auto;background:#1e1e3f;border-radius:16px;padding:40px;border:1px solid rgba(255,255,255,0.1)">
+                    <div style="font-size:48px;margin-bottom:16px">❌</div>
+                    <h2 style="margin:0 0 8px">Erro na conexão</h2>
+                    <p style="color:#f87171;font-size:14px">${result.error}</p>
+                    <p style="color:#64748b;font-size:12px;margin-top:16px">Fechando automaticamente...</p>
+                </div>
+                <script>setTimeout(() => window.close(), 5000)</script>
+            </body></html>
+        `);
+    }
+});
+
 // ── Account Management ─────────────────────────────────────────────────────
 router.get('/accounts', (req, res) => {
     try {
@@ -98,6 +170,88 @@ router.delete('/accounts/:id', (req, res) => {
 
     db.prepare('DELETE FROM ig_accounts WHERE id = ?').run(req.params.id);
     res.json({ success: true });
+});
+
+// ── Graph API — Conectar conta via Token ───────────────────────────────────
+// Recebe ig_user_id + access_token e salva na conta para usar a Graph API
+// em vez do Puppeteer. O usuário obtém esses dados no Meta Graph API Explorer.
+const graphApi = require('./graph_api');
+
+router.post('/accounts/:id/connect-api', async (req, res) => {
+    try {
+        const account = db.prepare('SELECT * FROM ig_accounts WHERE id = ?').get(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        const { ig_user_id, access_token } = req.body;
+        if (!ig_user_id || !access_token) {
+            return res.status(400).json({ error: 'ig_user_id e access_token são obrigatórios.' });
+        }
+
+        // Verificar se o token é válido consultando a API do Instagram
+        const verification = await graphApi.verifyToken(ig_user_id, access_token);
+        if (!verification.valid) {
+            return res.status(400).json({
+                error: `Token inválido: ${verification.error}`,
+                details: 'Verifique se o ig_user_id e access_token estão corretos e se o token tem as permissões necessárias.'
+            });
+        }
+
+        // Token válido — salvar no banco e ativar método API
+        db.prepare(`
+            UPDATE ig_accounts SET
+                ig_user_id = ?, access_token = ?, publish_method = 'api',
+                username = COALESCE(?, username), status = 'connected'
+            WHERE id = ?
+        `).run(ig_user_id, access_token, verification.username, req.params.id);
+
+        const updated = db.prepare('SELECT * FROM ig_accounts WHERE id = ?').get(req.params.id);
+        const io = req.app.get('io');
+        if (io) io.emit('ig-account-status', { id: updated.id, status: 'connected', username: verification.username });
+
+        res.json({
+            success: true,
+            account: updated,
+            instagram: verification, // username, followers, mediaCount etc
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Verificar se o token de uma conta ainda funciona
+router.get('/accounts/:id/verify-token', async (req, res) => {
+    try {
+        const account = db.prepare('SELECT * FROM ig_accounts WHERE id = ?').get(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        if (!account.ig_user_id || !account.access_token) {
+            return res.json({ valid: false, error: 'Conta não conectada via API.' });
+        }
+
+        const verification = await graphApi.verifyToken(account.ig_user_id, account.access_token);
+        res.json(verification);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Desconectar API e voltar para Puppeteer
+router.post('/accounts/:id/disconnect-api', (req, res) => {
+    try {
+        const account = db.prepare('SELECT * FROM ig_accounts WHERE id = ?').get(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        db.prepare(`
+            UPDATE ig_accounts SET
+                ig_user_id = NULL, access_token = NULL, token_expires_at = NULL,
+                publish_method = 'puppeteer'
+            WHERE id = ?
+        `).run(req.params.id);
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // ── Post Management ────────────────────────────────────────────────────────

@@ -47,10 +47,22 @@ db.exec(`
   );
 `);
 
-// Migrations: add columns if they don't exist (safe no-op if already there)
-const columns = db.prepare("PRAGMA table_info(ig_posts)").all().map(c => c.name);
-if (!columns.includes('post_type')) db.exec("ALTER TABLE ig_posts ADD COLUMN post_type TEXT DEFAULT 'single'");
-if (!columns.includes('aspect_ratio')) db.exec("ALTER TABLE ig_posts ADD COLUMN aspect_ratio TEXT DEFAULT '1:1'");
-if (!columns.includes('media_files')) db.exec("ALTER TABLE ig_posts ADD COLUMN media_files TEXT DEFAULT '[]'");
+// ── Migrations: adiciona colunas se não existirem (safe no-op se já existem) ──
+const postColumns = db.prepare("PRAGMA table_info(ig_posts)").all().map(c => c.name);
+if (!postColumns.includes('post_type')) db.exec("ALTER TABLE ig_posts ADD COLUMN post_type TEXT DEFAULT 'single'");
+if (!postColumns.includes('aspect_ratio')) db.exec("ALTER TABLE ig_posts ADD COLUMN aspect_ratio TEXT DEFAULT '1:1'");
+if (!postColumns.includes('media_files')) db.exec("ALTER TABLE ig_posts ADD COLUMN media_files TEXT DEFAULT '[]'");
+
+// ── Novas colunas para integração com a Instagram Graph API ──────────────
+// ig_user_id: O ID numérico do Instagram na API (diferente do @username)
+// access_token: Token de acesso com permissão instagram_business_content_publish
+// token_expires_at: Data ISO de expiração do token (tokens de longa duração duram ~60 dias)
+// publish_method: 'api' (Graph API) ou 'puppeteer' (automação de browser — legacy)
+const accColumns = db.prepare("PRAGMA table_info(ig_accounts)").all().map(c => c.name);
+if (!accColumns.includes('ig_user_id')) db.exec("ALTER TABLE ig_accounts ADD COLUMN ig_user_id TEXT");
+if (!accColumns.includes('access_token')) db.exec("ALTER TABLE ig_accounts ADD COLUMN access_token TEXT");
+if (!accColumns.includes('token_expires_at')) db.exec("ALTER TABLE ig_accounts ADD COLUMN token_expires_at TEXT");
+if (!accColumns.includes('publish_method')) db.exec("ALTER TABLE ig_accounts ADD COLUMN publish_method TEXT DEFAULT 'puppeteer'");
 
 module.exports = { db, COOKIES_DIR };
+

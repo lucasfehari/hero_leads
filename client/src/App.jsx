@@ -50,7 +50,11 @@ function App() {
         setQrCode(null);
         addWaLog('WhatsApp conectado com sucesso! ✅', 'success');
       } else if (data.status === 'disconnected') {
+        setQrCode(null);
         addWaLog('WhatsApp desconectado. ❌', 'error');
+      } else if (data.status === 'switching') {
+        setQrCode(null);
+        addWaLog(`Trocando para sessão: ${data.session}...`, 'info');
       }
     });
 

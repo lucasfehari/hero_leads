@@ -1,5 +1,5 @@
 const antiBan = require('./anti-ban');
-
+const { MessageMedia } = require('whatsapp-web.js');
 const {
     gaussianDelay, distractionSpike, sleep,
     getSessionWarmup, recordSend,
@@ -81,6 +81,7 @@ class MessageQueue {
             ? shuffleContacts(numbers)
             : numbers;
 
+        const sessionName = this.getSessionName();
         const badNumbers = loadBadNumbers(sessionName);
         const tasks = list.map(num => ({
             number: num.replace(/\D/g, '') + '@c.us',
@@ -151,51 +152,95 @@ class MessageQueue {
             }
 
             try {
-                // ── Camada 4: Validar número ──────────────────────────────────
-                if (this.config.antiBanEnabled && this.config.validateNumbers && client) {
-                    const valid = await isValidWhatsAppNumber(client, task.number);
-                    if (!valid) {
-                        saveBadNumber(sessionName, task.number);
-                        this.totalSkipped++;
-                        this.notifyStatus('invalid_number', { number: task.rawNumber, skipped: this.totalSkipped });
-                        continue;
+                let targetId = task.number;
+                let skipContact = false;
+
+                // ── Camada 4: Validar e Obter ID Oficial do WhatsApp ────────────
+                if (client) {
+                    try {
+                        const numberId = await client.getNumberId(task.rawNumber);
+                        if (!numberId) {
+                            if (this.config.antiBanEnabled && this.config.validateNumbers) {
+                                saveBadNumber(sessionName, task.number);
+                                this.totalSkipped++;
+                                this.notifyStatus('invalid_number', { number: task.rawNumber, skipped: this.totalSkipped });
+                                skipContact = true;
+                            }
+                        } else {
+                            targetId = numberId._serialized; // Esse ID evita o erro "No LID for user"
+                        }
+                    } catch (e) {
+                        // Se falhar a rede, ignora e tenta enviar com o ID padrão
                     }
                 }
+                
+                if (skipContact) continue;
 
                 // ── Enviar cada mensagem para este contato ─────────────────────
                 for (let i = 0; i < task.messages.length; i++) {
                     const rawTemplate = task.messages[i];
-
-                    // ── Camada 5: Humanizar mensagem ──────────────────────────
-                    const message = this.config.antiBanEnabled
-                        ? humanizeMessage(rawTemplate, { emojiPool: this.config.emojiPool })
-                        : rawTemplate.replace(/\{([^{}]+)\}/g, (_, c) => {
-                            const opts = c.split('|');
-                            return opts[Math.floor(Math.random() * opts.length)];
-                        });
-
-                    // Simulação de digitação (typing indicator)
-                    try {
-                        if (client) {
-                            const chat = await client.getChatById(task.number);
-                            await chat.sendStateTyping();
-                            // Tempo de digitação proporcional ao tamanho (humano)
-                            const typingTime = this.config.antiBanEnabled
-                                ? gaussianDelay(
-                                    Math.min(message.length * 50, 1000),
-                                    Math.min(message.length * 120, 6000)
-                                )
-                                : Math.min(message.length * 80, 4000);
-                            await sleep(typingTime);
-                        }
-                    } catch (e) {
-                        await sleep(1500);
-                    }
-
-                    // Enviar
+                    const isAudio = typeof rawTemplate === 'object' && rawTemplate.type === 'audio';
                     const activeClient = this.getClient();
                     if (!activeClient) throw new Error('Cliente WhatsApp não disponível');
-                    await activeClient.sendMessage(task.number, message);
+
+                    if (isAudio) {
+                        // ── ENVIAR ÁUDIO COMO PTT ───────────────────────────────
+                        try {
+                            const { convertToOggOpus } = require('./audioConverter');
+                            const oggPath = await convertToOggOpus(rawTemplate.path);
+                            const media = MessageMedia.fromFilePath(oggPath);
+                            
+                            // Forçar o mimetype para ser reconhecido corretamente pelo WhatsApp
+                            media.mimetype = 'audio/ogg; codecs=opus';
+                            
+                            // Simulação de gravação de áudio
+                            if (client) {
+                                const chat = await client.getChatById(targetId);
+                                await chat.sendStateRecording();
+                                // Tempo fixo/aleatório de gravação simulado para ser rápido mas verossímil
+                                const recordTime = this.config.antiBanEnabled ? gaussianDelay(2000, 6000) : 2500;
+                                await sleep(recordTime);
+                            }
+                            
+                            await activeClient.sendMessage(targetId, media, { sendAudioAsVoice: true });
+                        } catch (e) {
+                            console.error('Erro ao enviar áudio:', e.message);
+                            this.notifyStatus('error', { error: `Erro no áudio: ${e.message}` });
+                        }
+                    } else {
+                        // ── ENVIAR TEXTO ─────────────────────────────────────────
+                        // rawTemplate is assumed to be string or rawTemplate.text
+                        const textTemplate = typeof rawTemplate === 'object' ? rawTemplate.text || '' : rawTemplate;
+
+                        // ── Camada 5: Humanizar mensagem ──────────────────────────
+                        const message = this.config.antiBanEnabled
+                            ? humanizeMessage(textTemplate, { emojiPool: this.config.emojiPool })
+                            : textTemplate.replace(/\{([^{}]+)\}/g, (_, c) => {
+                                const opts = c.split('|');
+                                return opts[Math.floor(Math.random() * opts.length)];
+                            });
+
+                        // Simulação de digitação (typing indicator)
+                        try {
+                            if (client) {
+                                const chat = await client.getChatById(targetId);
+                                await chat.sendStateTyping();
+                                // Tempo de digitação proporcional ao tamanho (humano)
+                                const typingTime = this.config.antiBanEnabled
+                                    ? gaussianDelay(
+                                        Math.min(message.length * 50, 1000),
+                                        Math.min(message.length * 120, 6000)
+                                    )
+                                    : Math.min(message.length * 80, 4000);
+                                await sleep(typingTime);
+                            }
+                        } catch (e) {
+                            await sleep(1500);
+                        }
+
+                        // Enviar
+                        await activeClient.sendMessage(targetId, message);
+                    }
 
                     this.totalProcessed++;
 

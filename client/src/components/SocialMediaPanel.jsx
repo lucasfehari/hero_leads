@@ -30,10 +30,10 @@ const fmtDate = (iso) => {
     return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-// ── Account Card ───────────────────────────────────────────────────────────
-function AccountCard({ account, onLogin, onRemove, onCheckStatus }) {
+function AccountCard({ account, onLogin, onRemove, onCheckStatus, onConnectApi, onDisconnectApi }) {
     const connected = account.status === 'connected';
     const loggingIn = account.status === 'logging_in';
+    const isApi = account.publish_method === 'api';
     return (
         <div className="flex items-center justify-between bg-slate-900/60 border border-white/5 rounded-xl p-4 gap-4 hover:border-purple-500/20 transition-all">
             <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -43,13 +43,23 @@ function AccountCard({ account, onLogin, onRemove, onCheckStatus }) {
                 <div className="min-w-0">
                     <p className="text-white font-semibold truncate">{account.name}</p>
                     {account.username && <p className="text-slate-500 text-xs truncate">@{account.username}</p>}
-                    <div className="flex items-center gap-1 mt-0.5">
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         {connected
                             ? <><Wifi className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400 text-xs">Conectado</span></>
                             : loggingIn
                                 ? <><RefreshCw className="w-3 h-3 text-yellow-400 animate-spin" /><span className="text-yellow-400 text-xs">Aguardando login...</span></>
                                 : <><WifiOff className="w-3 h-3 text-slate-500" /><span className="text-slate-500 text-xs">Desconectado</span></>
                         }
+                        {/* Badge do método de publicação */}
+                        {isApi ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                ⚡ API
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                                🌐 Browser
+                            </span>
+                        )}
                     </div>
                 </div>
             </div>
@@ -57,6 +67,18 @@ function AccountCard({ account, onLogin, onRemove, onCheckStatus }) {
                 <button onClick={() => onCheckStatus(account.id)} title="Verificar sessão" className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all">
                     <RefreshCw className="w-4 h-4" />
                 </button>
+                {/* Botão de conectar/desconectar API */}
+                {isApi ? (
+                    <button onClick={() => onDisconnectApi(account.id)} title="Desconectar API"
+                        className="px-2 py-1.5 rounded-lg text-orange-400 hover:bg-orange-500/10 border border-orange-500/20 text-xs font-bold transition-all">
+                        Desconectar API
+                    </button>
+                ) : (
+                    <button onClick={() => onConnectApi(account)} title="Conectar via Graph API"
+                        className="px-2 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all">
+                        ⚡ Conectar API
+                    </button>
+                )}
                 {!connected && !loggingIn && (
                     <button onClick={() => onLogin(account.id)} className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all">
                         Reconectar
@@ -102,6 +124,98 @@ function AddAccountModal({ onClose, onAdded }) {
                     <button onClick={handleAdd} disabled={loading || !name.trim()}
                         className="flex-1 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold transition-all disabled:opacity-50 text-sm">
                         {loading ? 'Abrindo browser...' : 'Adicionar & Fazer Login'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── Connect API Modal ──────────────────────────────────────────────────────
+// Modal para configurar a Graph API (ig_user_id + access_token)
+// O usuário obtém esses dados no Meta Graph API Explorer
+function ConnectApiModal({ account, onClose, onConnected }) {
+    const [igUserId, setIgUserId] = useState('');
+    const [accessToken, setAccessToken] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleConnect = async () => {
+        if (!igUserId.trim() || !accessToken.trim()) return;
+        setLoading(true);
+        setError('');
+        try {
+            const res = await fetch(`${API}/accounts/${account.id}/connect-api`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ig_user_id: igUserId.trim(), access_token: accessToken.trim() }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                onConnected(data);
+                onClose();
+            } else {
+                setError(data.error || 'Erro ao conectar.');
+            }
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="glass-panel rounded-2xl p-8 w-full max-w-lg mx-4 space-y-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-white font-bold text-lg">⚡ Conectar via Graph API</h3>
+                    <button onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="text-slate-400 text-xs space-y-2 bg-slate-800/50 rounded-xl p-4 border border-white/5">
+                    <p className="text-white font-semibold text-sm mb-2">📋 Como obter seus dados:</p>
+                    <ol className="list-decimal list-inside space-y-1">
+                        <li>Acesse <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer" className="text-purple-400 underline">developers.facebook.com/apps</a></li>
+                        <li>Crie um app (tipo: Business) e adicione o produto "Instagram"</li>
+                        <li>Vá em <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer" className="text-purple-400 underline">Graph API Explorer</a></li>
+                        <li>Selecione seu app e gere um token com permissões:<br />
+                            <code className="text-emerald-300">instagram_business_basic</code> + <code className="text-emerald-300">instagram_business_content_publish</code>
+                        </li>
+                        <li>Clique em "Get User Token" → autorize a conta Instagram</li>
+                        <li>Para o <b>IG User ID</b>: no Explorer, faça GET em <code className="text-purple-300">me/accounts</code> → pegue o <code className="text-purple-300">id</code> da Page → depois GET em <code className="text-purple-300">{'{page-id}'}?fields=instagram_business_account</code></li>
+                    </ol>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="space-y-2">
+                        <label className="text-slate-400 text-sm font-medium">Instagram User ID</label>
+                        <input value={igUserId} onChange={e => setIgUserId(e.target.value)}
+                            placeholder="Ex: 17841412345678"
+                            className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 transition-all font-mono text-sm" />
+                        <p className="text-slate-500 text-xs">O ID numérico da conta Instagram (não é o @username)</p>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-slate-400 text-sm font-medium">Access Token</label>
+                        <textarea value={accessToken} onChange={e => setAccessToken(e.target.value)}
+                            placeholder="EAAxxxxxxxxxxxxxxxx..."
+                            rows={3}
+                            className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50 transition-all font-mono text-xs resize-none" />
+                        <p className="text-slate-500 text-xs">Token de longa duração com permissão de publicação</p>
+                    </div>
+                </div>
+
+                {error && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-red-300 text-xs">
+                        ❌ {error}
+                    </div>
+                )}
+
+                <div className="flex gap-3">
+                    <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/10 text-slate-400 hover:text-white hover:bg-white/5 transition-all text-sm">Cancelar</button>
+                    <button onClick={handleConnect} disabled={loading || !igUserId.trim() || !accessToken.trim()}
+                        className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold transition-all disabled:opacity-50 text-sm">
+                        {loading ? 'Verificando token...' : '⚡ Conectar & Verificar'}
                     </button>
                 </div>
             </div>
@@ -617,6 +731,7 @@ export default function SocialMediaPanel({ socket }) {
     const [posts, setPosts] = useState([]);
     const [showAddAccount, setShowAddAccount] = useState(false);
     const [editingPost, setEditingPost] = useState(null);
+    const [connectApiAccount, setConnectApiAccount] = useState(null); // Conta selecionada para conectar via API
 
     const loadAccounts = useCallback(async () => {
         try { const r = await fetch(`${API}/accounts`); const d = await r.json(); setAccounts(d.accounts || []); } catch { }
@@ -644,6 +759,38 @@ export default function SocialMediaPanel({ socket }) {
     const handleRelogin = async (id) => { await fetch(`${API}/accounts/${id}/login`, { method: 'POST' }); setAccounts(prev => prev.map(a => a.id === id ? { ...a, status: 'logging_in' } : a)); };
     const handleCheckStatus = async (id) => { const r = await fetch(`${API}/accounts/${id}/status`); const d = await r.json(); setAccounts(prev => prev.map(a => a.id === id ? { ...a, status: d.status } : a)); };
     const handleDeletePost = async (id) => { if (!confirm('Excluir este post?')) return; await fetch(`${API}/posts/${id}`, { method: 'DELETE' }); setPosts(prev => prev.filter(p => p.id !== id)); };
+
+    // Handlers da Graph API — OAuth automático (abre popup do Instagram)
+    const handleConnectApi = (account) => {
+        // Abre popup do Instagram para autorizar — tudo automático
+        const w = 500, h = 700;
+        const left = (window.screen.width - w) / 2;
+        const top = (window.screen.height - h) / 2;
+        window.open(
+            `${API}/oauth/authorize/${account.id}`,
+            'ig_oauth',
+            `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`
+        );
+    };
+    const handleDisconnectApi = async (id) => {
+        if (!confirm('Desconectar a Graph API? Voltará a usar automação de browser.')) return;
+        await fetch(`${API}/accounts/${id}/disconnect-api`, { method: 'POST' });
+        setAccounts(prev => prev.map(a => a.id === id ? { ...a, publish_method: 'puppeteer', ig_user_id: null, access_token: null } : a));
+    };
+
+    // Listener para receber o postMessage do popup OAuth quando a conexão for feita
+    useEffect(() => {
+        const handleOAuthMessage = (event) => {
+            if (event.data?.type === 'ig-oauth-success' && event.data?.account) {
+                // Atualizar a conta na lista com os novos dados da API
+                const updated = event.data.account;
+                setAccounts(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a));
+                loadAccounts(); // Recarregar para garantir dados atualizados
+            }
+        };
+        window.addEventListener('message', handleOAuthMessage);
+        return () => window.removeEventListener('message', handleOAuthMessage);
+    }, [loadAccounts]);
 
     const handlePostSaved = (post) => {
         setPosts(prev => {
@@ -674,6 +821,9 @@ export default function SocialMediaPanel({ socket }) {
         <div className="lg:col-span-12 flex flex-col gap-6">
             {showAddAccount && (
                 <AddAccountModal onClose={() => setShowAddAccount(false)} onAdded={(account) => setAccounts(prev => [...prev, { ...account, status: 'logging_in' }])} />
+            )}
+            {connectApiAccount && (
+                <ConnectApiModal account={connectApiAccount} onClose={() => setConnectApiAccount(null)} onConnected={handleApiConnected} />
             )}
 
             {/* Tab bar */}
@@ -725,7 +875,7 @@ export default function SocialMediaPanel({ socket }) {
                         ) : (
                             <div className="space-y-3">
                                 {accounts.map(a => (
-                                    <AccountCard key={a.id} account={a} onLogin={handleRelogin} onRemove={handleRemoveAccount} onCheckStatus={handleCheckStatus} />
+                                    <AccountCard key={a.id} account={a} onLogin={handleRelogin} onRemove={handleRemoveAccount} onCheckStatus={handleCheckStatus} onConnectApi={handleConnectApi} onDisconnectApi={handleDisconnectApi} />
                                 ))}
                             </div>
                         )}

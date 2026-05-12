@@ -73,12 +73,14 @@ class WhatsAppService {
 
         this.currentSession = sessionName;
         this.isConnected = false;
+        this.currentQr = null;
 
         this.client = new Client({
             authStrategy: new LocalAuth({
                 clientId: sessionName,
                 dataPath: SESSIONS_DIR
             }),
+            ffmpegPath: require('ffmpeg-static'),
             puppeteer: {
                 headless: true,
                 protocolTimeout: 60000,
@@ -109,12 +111,14 @@ class WhatsAppService {
 
     initialize() {
         this.client.on('qr', (qr) => {
+            this.currentQr = qr;
             console.log('QR recebido para sessão:', this.currentSession);
             saveMeta(this.currentSession, { status: 'scan_qr' });
             this.io.emit('wa-qr', qr);
         });
 
         this.client.on('ready', async () => {
+            this.currentQr = null;
             console.log('WhatsApp Client is ready! Session:', this.currentSession);
             this.isConnected = true;
 
@@ -131,6 +135,7 @@ class WhatsAppService {
         });
 
         this.client.on('authenticated', () => {
+            this.currentQr = null;
             console.log('WhatsApp Authenticated. Session:', this.currentSession);
             saveMeta(this.currentSession, { status: 'authenticated' });
             this.io.emit('wa-status', { status: 'authenticated', session: this.currentSession });
@@ -286,7 +291,17 @@ let instance = null;
 
 module.exports = {
     init: (io) => {
-        if (!instance) instance = new WhatsAppService(io);
+        if (!instance) {
+            instance = new WhatsAppService(io);
+            io.on('connection', (socket) => {
+                if (instance.currentQr) {
+                    socket.emit('wa-qr', instance.currentQr);
+                } else if (instance.isConnected) {
+                    const meta = getMeta(instance.currentSession);
+                    socket.emit('wa-status', { status: 'connected', session: instance.currentSession, phone: meta?.phone });
+                }
+            });
+        }
         return instance;
     },
     getInstance: () => instance

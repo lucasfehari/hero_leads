@@ -5,6 +5,7 @@ import {
     Zap, AlertTriangle, BarChart2, ToggleLeft, ToggleRight
 } from 'lucide-react';
 import io from 'socket.io-client';
+import DmWorkflowBuilder from './DmWorkflowBuilder';
 
 const socket = io('http://localhost:3000');
 const API = 'http://localhost:3000/api/whatsapp';
@@ -57,7 +58,7 @@ const WhatsAppSender = ({ prefillNumbers }) => {
 
     // Campaign
     const [numbers, setNumbers] = useState('');
-    const [messages, setMessages] = useState(['']);
+    const [waSteps, setWaSteps] = useState([{ type: 'text', text: '' }]);
     const [config, setConfig] = useState({
         minDelay: 12,
         maxDelay: 35,
@@ -215,23 +216,44 @@ const WhatsAppSender = ({ prefillNumbers }) => {
         } catch (e) { alert('Erro: ' + e.message); }
     };
 
-    // ── Multi-mensagem ────────────────────────────────────────────────────────
-    const addMessage = () => setMessages(p => [...p, '']);
-    const removeMessage = (i) => setMessages(p => p.filter((_, idx) => idx !== i));
-    const updateMessage = (i, v) => setMessages(p => p.map((m, idx) => idx === i ? v : m));
-
-    // ── Emoji pool ────────────────────────────────────────────────────────────
-    const addEmoji = (emoji) => {
-        if (!emoji.trim()) return;
-        setConfig(c => ({ ...c, emojiPool: [...new Set([...c.emojiPool, emoji.trim()])] }));
-        setEmojiInput('');
-    };
-
     // ── Iniciar campanha ──────────────────────────────────────────────────────
     const handleStart = async () => {
-        const validMessages = messages.filter(m => m.trim());
         const numberList = numbers.split(/[\n,]+/).map(n => n.trim()).filter(Boolean);
-        if (!numberList.length || !validMessages.length) return alert('Preencha números e pelo menos uma mensagem!');
+        
+        const validMessages = [];
+        let audioIdx = 0;
+
+        for (const step of waSteps) {
+            if (step.type === 'text') {
+                if (step.text?.trim()) validMessages.push(step.text.trim());
+            } else if (step.type === 'audio') {
+                audioIdx++;
+                const tag = `wa-audio-${audioIdx}`;
+
+                if (step.audioServerPath) {
+                    validMessages.push({ type: 'audio', path: step.audioServerPath });
+                } else if (step.audioBlob) {
+                    const formData = new FormData();
+                    formData.append('audio', step.audioBlob, `${tag}.webm`);
+                    formData.append('id', tag);
+                    try {
+                        const res = await fetch('http://localhost:3000/api/bot/upload-audio', { method: 'POST', body: formData });
+                        const data = await res.json();
+                        if (data.success) {
+                            validMessages.push({ type: 'audio', path: data.path });
+                        } else {
+                            throw new Error(data.error);
+                        }
+                    } catch (err) {
+                        alert('Erro ao fazer upload do áudio: ' + err.message);
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (!numberList.length || !validMessages.length) return alert('Preencha números e adicione pelo menos uma mensagem/áudio!');
+        
         setStatusHistory([]);
         try {
             const r = await fetch(`${API}/start`, {
@@ -295,20 +317,22 @@ const WhatsAppSender = ({ prefillNumbers }) => {
                         {sessions.length > 0 && (
                             <div className="space-y-2">
                                 {sessions.map(s => (
-                                    <div key={s} className={`flex items-center justify-between p-3 rounded-xl border ${s === currentSession ? 'border-purple-500/40 bg-purple-500/10' : 'border-white/5 bg-slate-900/40'}`}>
+                                    <div key={s.name} className={`flex items-center justify-between p-3 rounded-xl border ${s.name === currentSession ? 'border-purple-500/40 bg-purple-500/10' : 'border-white/5 bg-slate-900/40'}`}>
                                         <div className="flex items-center gap-2">
-                                            {s === currentSession && <CheckCircle className="w-4 h-4 text-purple-400" />}
-                                            <span className="text-sm font-mono text-slate-200">{s}</span>
-                                            {s === currentSession && <span className="text-xs text-purple-400">(ativa)</span>}
+                                            {s.name === currentSession && <CheckCircle className="w-4 h-4 text-purple-400" />}
+                                            <span className="text-sm font-mono text-slate-200">
+                                                {s.label || s.name} {s.phone && <span className="text-xs text-slate-500">({s.phone})</span>}
+                                            </span>
+                                            {s.name === currentSession && <span className="text-xs text-purple-400">(ativa)</span>}
                                         </div>
                                         <div className="flex gap-2">
-                                            {s !== currentSession && (
+                                            {s.name !== currentSession && (
                                                 <>
-                                                    <button onClick={() => switchToSession(s)} disabled={sessionLoading}
+                                                    <button onClick={() => switchToSession(s.name)} disabled={sessionLoading}
                                                         className="text-xs px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors flex items-center gap-1">
                                                         {sessionLoading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />} Conectar
                                                     </button>
-                                                    <button onClick={() => handleDeleteSession(s)}
+                                                    <button onClick={() => handleDeleteSession(s.name)}
                                                         className="text-xs px-2 py-1 bg-red-900/30 hover:bg-red-800/50 text-red-400 rounded-lg">
                                                         <Trash2 className="w-3 h-3" />
                                                     </button>
@@ -528,11 +552,11 @@ const WhatsAppSender = ({ prefillNumbers }) => {
 
             {/* ── ANTI-BAN CONFIG ──────────────────────────────────────── */}
             <div className="bg-slate-800/20 rounded-2xl border border-white/5 overflow-hidden">
-                <button
-                    className="w-full flex items-center justify-between p-4 text-left hover:bg-white/5 transition-colors"
-                    onClick={() => setAntiBanOpen(o => !o)}
-                >
-                    <div className="flex items-center gap-3">
+                <div className="w-full flex items-center justify-between p-4 text-left hover:bg-white/5 transition-colors">
+                    <div 
+                        className="flex items-center gap-3 cursor-pointer flex-1"
+                        onClick={() => setAntiBanOpen(o => !o)}
+                    >
                         <ShieldCheck className={`w-5 h-5 ${config.antiBanEnabled ? 'text-green-400' : 'text-slate-500'}`} />
                         <div>
                             <p className="font-semibold text-white text-sm">Proteção Anti-Ban</p>
@@ -547,9 +571,15 @@ const WhatsAppSender = ({ prefillNumbers }) => {
                             onChange={(v) => setConfig(c => ({ ...c, antiBanEnabled: v }))}
                             label={config.antiBanEnabled ? 'ON' : 'OFF'}
                         />
-                        {antiBanOpen ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                        <button 
+                            type="button" 
+                            className="p-1" 
+                            onClick={() => setAntiBanOpen(o => !o)}
+                        >
+                            {antiBanOpen ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+                        </button>
                     </div>
-                </button>
+                </div>
 
                 {antiBanOpen && (
                     <div className="px-4 pb-5 border-t border-white/5 pt-4 space-y-5">
@@ -619,39 +649,18 @@ const WhatsAppSender = ({ prefillNumbers }) => {
                 <p className="text-xs text-slate-600 mt-1 ml-1">DDI + DDD + Número (ex: 5511...)</p>
             </div>
 
-            {/* ── MENSAGENS ────────────────────────────────────────────── */}
+            {/* ── MENSAGENS E ÁUDIOS ────────────────────────────────────────────── */}
             <div>
-                <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium text-slate-300">
-                        Mensagens <span className="text-slate-500 text-xs ml-1">(enviadas em sequência)</span>
-                    </label>
-                    <button onClick={addMessage}
-                        className="flex items-center gap-1 text-xs px-3 py-1.5 bg-green-600/20 hover:bg-green-600/40 text-green-400 rounded-lg border border-green-500/20 transition-colors">
-                        <Plus className="w-3 h-3" /> Adicionar
-                    </button>
+                <label className="text-sm font-medium text-slate-300 mb-2 block">
+                    Mensagens <span className="text-slate-500 text-xs ml-1">(enviadas em sequência)</span>
+                </label>
+                <div className="bg-slate-900/30 p-4 rounded-xl border border-white/5">
+                    <DmWorkflowBuilder
+                        steps={waSteps}
+                        onChange={setWaSteps}
+                    />
                 </div>
-                <div className="space-y-3">
-                    {messages.map((msg, idx) => (
-                        <div key={idx} className="flex items-start gap-2">
-                            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center mt-3">
-                                <span className="text-xs text-slate-500 font-mono">{idx + 1}</span>
-                            </div>
-                            <textarea
-                                className="flex-1 bg-slate-950/50 border border-slate-700 rounded-xl p-4 text-sm text-slate-200 h-24 outline-none resize-none custom-scrollbar transition-all hover:border-slate-600 focus:ring-2 focus:ring-green-500/50"
-                                placeholder={`Mensagem ${idx + 1}... Use {Opção1|Opção2} para variações`}
-                                value={msg}
-                                onChange={e => updateMessage(idx, e.target.value)}
-                            />
-                            {messages.length > 1 && (
-                                <button onClick={() => removeMessage(idx)}
-                                    className="mt-3 p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors">
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            )}
-                        </div>
-                    ))}
-                </div>
-                {messages.length > 1 && (
+                {waSteps.length > 1 && (
                     <div className="mt-3 bg-slate-800/20 rounded-xl p-3 border border-white/5 flex items-center gap-3">
                         <Clock className="w-4 h-4 text-slate-500 flex-shrink-0" />
                         <span className="text-xs text-slate-500">Delay entre msgs:</span>
