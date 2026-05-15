@@ -168,7 +168,7 @@ const exploreReels = async (page, keywords, logCallback, excludedKeywords = []) 
     }
 
     let reelsProcessed = 0;
-    const MAX_REELS = 50; // Use a much larger limit as requested
+    const MAX_REELS = 15; // Limit per cycle so the bot can rotate to other strategies faster
     let noMatchCount = 0;
 
     while (reelsProcessed < MAX_REELS) {
@@ -180,40 +180,70 @@ const exploreReels = async (page, keywords, logCallback, excludedKeywords = []) 
 
         // 2. Extract Caption/Description & Author
         const { caption, author } = await page.evaluate(() => {
-            // Try common selectors for Reel CAption
-            // Instagram Reels DOM is tricky and changes often.
-            // We look for the main text container.
-
-            // This selector targets the Reel text area container
-            const nodes = document.querySelectorAll('div[role="button"]');
             let foundCaption = "";
             let foundAuthor = "";
 
-            // Heuristic: Find the text content near the "Follow" button or Author Name
-            // In Reels, the Author name is usually an anchor tag inside a specific structure
+            // ── Strategy 1: Use meta og:description (most reliable) ─────────
+            const ogDesc = document.querySelector('meta[property="og:description"]');
+            if (ogDesc && ogDesc.content) {
+                foundCaption = ogDesc.content;
+            }
 
-            // Try finding the currently active reel (center of screen usually)
-            // But simplify: Just look for visible text on screen. 
-            // In Reels mode, usually only one is prominent.
+            // ── Strategy 2: Look for the Reel caption container ─────────────
+            // Instagram renders captions in a specific structure near the bottom-left
+            // Try known selectors for the active reel caption text
+            if (!foundCaption) {
+                // Selector for the caption div in reels (span inside a specific container)
+                const captionCandidates = [
+                    'div[class*="x1lliihq"] span[dir="auto"]',
+                    'div[role="dialog"] span[dir="auto"]',
+                    'span[dir="auto"]',
+                ];
+                for (const sel of captionCandidates) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText && el.innerText.length > 5) {
+                        foundCaption = el.innerText;
+                        break;
+                    }
+                }
+            }
 
-            const h1 = document.querySelector('h1');
-            if (h1) foundCaption = h1.innerText;
+            // ── Strategy 3: Fallback — any visible span with decent length ──
+            if (!foundCaption) {
+                const spans = Array.from(document.querySelectorAll('span'));
+                // Look for a span that seems like a real caption (longer text, not UI labels)
+                const longSpan = spans.find(s => {
+                    const txt = (s.innerText || '').trim();
+                    return txt.length > 15 && txt.length < 500 &&
+                        !txt.includes('Follow') && !txt.includes('Like') &&
+                        !txt.includes('Comment') && !txt.includes('Share');
+                });
+                if (longSpan) foundCaption = longSpan.innerText.trim();
+            }
 
-            // Fallback: look for spans with text that looks like caption
-            const spans = Array.from(document.querySelectorAll('span'));
-            // Filter for longer text that isn't UI text
-            const longSpan = spans.find(s => s.innerText.length > 20 && s.innerText.length < 300);
-            if (longSpan) foundCaption += " " + longSpan.innerText;
+            // ── Find Author ─────────────────────────────────────────────────
+            // Priority 1: og:title usually has "username (@handle)"
+            const ogTitle = document.querySelector('meta[property="og:title"]');
+            if (ogTitle) {
+                const match = ogTitle.content.match(/\(@([a-zA-Z0-9_.]+)\)/);
+                if (match) foundAuthor = '/' + match[1] + '/';
+            }
 
-            // Find Author
-            // Look for links that are NOT hashtags/music/places
-            const links = Array.from(document.querySelectorAll('a'));
-            const authorLink = links.find(a => {
-                const href = a.getAttribute('href');
-                return href && href.startsWith('/') && !href.includes('/explore/') && !href.includes('/audio/') && !href.includes('/reels/') && href.split('/').length === 3;
-            });
-
-            if (authorLink) foundAuthor = authorLink.getAttribute('href');
+            // Priority 2: Look for profile links in the page (bottom-left in Reels)
+            if (!foundAuthor) {
+                const links = Array.from(document.querySelectorAll('a'));
+                const authorLink = links.find(a => {
+                    const href = a.getAttribute('href');
+                    if (!href) return false;
+                    // Profile links: start with '/', single path segment, no known system paths
+                    const systemPaths = ['/explore/', '/audio/', '/reels/', '/p/', '/stories/', '/direct/', '/accounts/', '/legal/', '/hashtag/'];
+                    if (systemPaths.some(s => href.includes(s))) return false;
+                    // Must be /username/ or /username format
+                    const parts = href.split('/').filter(Boolean);
+                    return parts.length === 1 && /^[a-zA-Z0-9_.]+$/.test(parts[0]);
+                });
+                if (authorLink) foundAuthor = authorLink.getAttribute('href');
+            }
 
             return { caption: foundCaption, author: foundAuthor };
         });

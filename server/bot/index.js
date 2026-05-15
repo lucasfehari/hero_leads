@@ -137,6 +137,10 @@ class BotEngine {
         const seenHashtagPosts = new Set(); // Session memory for hashtags
 
         let customListIndex = 0;
+        // Round-robin: run hashtags N times for every 1 reels run
+        // Pattern: [hashtags, hashtags, reels, hashtags, hashtags, reels, ...]
+        const STRATEGY_CYCLE = ['hashtags', 'hashtags', 'reels']; // 2:1 ratio
+        let strategyCycleIndex = 0;
 
         while (this.isRunning) {
             try {
@@ -163,16 +167,20 @@ class BotEngine {
                     // Human pause between actions
                     await this.humanPause('action_gap');
                 } else if (keywords.length > 0 || this.config.onlyReels) {
-                    // STRATEGY SWITCHER
-                    // If "Only Reels" is ON, force Reels.
-                    // Else: 70% chance Hashtags, 30% chance Reels (or alternate)
+                    // STRATEGY SWITCHER — Round-Robin
+                    // If "Only Reels" is ON, always use reels.
+                    // Else: cycle deterministically so all strategies are used.
 
                     if (this.config.onlyReels) {
                         this.strategyState = 'reels';
-                    } else if (Math.random() > 0.7) {
+                    } else if (keywords.length === 0) {
+                        // No hashtags configured — only reels available
                         this.strategyState = 'reels';
                     } else {
-                        this.strategyState = 'hashtags';
+                        // Round-robin through the strategy cycle
+                        this.strategyState = STRATEGY_CYCLE[strategyCycleIndex % STRATEGY_CYCLE.length];
+                        strategyCycleIndex++;
+                        this.log(`Strategy cycle [${strategyCycleIndex}/${STRATEGY_CYCLE.length}]: ${this.strategyState}`);
                     }
 
                     if (this.strategyState === 'reels') {
@@ -213,18 +221,14 @@ class BotEngine {
                 }
 
                 if (this.strategyState !== 'custom_list') {
-                    // Cycle Cool-down
-                    this.log(`Finished current strategy cycle. Cooling down...`);
-                    await randomDelay(30000, 60000);
+                    // Cycle Cool-down between strategies (human-like)
+                    const cooldownMs = Math.floor(Math.random() * 30000) + 15000; // 15s–45s
+                    this.log(`Finished [${this.strategyState}] cycle. Cooling down ${Math.round(cooldownMs/1000)}s before next strategy...`);
+                    await randomDelay(cooldownMs, cooldownMs);
                 }
             } catch (e) {
                 this.log(`Error during strategy execution: ${e.message}`, 'error');
                 this.stats.errors++;
-            }
-
-            if (this.strategyState !== 'custom_list') {
-                this.log('All keywords processed. Engine sleeping for 10 minutes...');
-                await randomDelay(600000, 600000);
             }
         }
     }

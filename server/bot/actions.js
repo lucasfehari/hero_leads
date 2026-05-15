@@ -506,15 +506,16 @@ const sendAudioHelper = async (page, audioPath) => {
 // CLICK EXPAND BUTTON — obrigatório antes de buscar o microfone
 // ─────────────────────────────────────────────────────────────────────────────
 const clickExpandButton = async (page) => {
-    // Estratégia 1: aria-label="Expandir" (PT) ou "Expand" (EN)
-    const expandLabels = ['expandir', 'expand', 'more options', 'mais opções'];
+    // Estratégia 1: aria-label="Expandir" (PT) ou "Expand" (EN) ou variantes
+    const expandLabels = ['expandir', 'expand', 'more options', 'mais opcoes', 'mais', 'more'];
 
     const s1 = await page.evaluateHandle((labels) => {
         for (const el of Array.from(document.querySelectorAll('[aria-label]'))) {
             const lbl = (el.getAttribute('aria-label') || '').toLowerCase().trim();
-            if (labels.includes(lbl)) {
-                const btn = el.closest('div[role="button"]') || el.closest('button');
-                if (btn) return btn;
+            if (labels.some(l => lbl === l || lbl.includes(l))) {
+                const btn = el.closest('div[role="button"]') || el.closest('button') || el;
+                const r = btn.getBoundingClientRect();
+                if (r.width > 0 && r.width < 80 && r.height > 0) return btn;
             }
         }
         return null;
@@ -522,12 +523,12 @@ const clickExpandButton = async (page) => {
 
     if (s1 && s1.asElement()) {
         await s1.click();
-        console.log('[EXPAND] ✅ Estratégia 1: Expandir clicado via aria-label.');
+        console.log('[EXPAND] Estrategia 1: Expandir clicado via aria-label.');
         await randomDelay(700, 1000);
         return true;
     }
 
-    // Estratégia 2: <title>Expandir</title> dentro do SVG
+    // Estrategia 2: SVG title Expandir/Expand
     const s2 = await page.evaluateHandle(() => {
         const titles = Array.from(document.querySelectorAll('svg title'));
         const t = titles.find(el => ['expandir', 'expand'].includes(el.textContent.trim().toLowerCase()));
@@ -537,27 +538,79 @@ const clickExpandButton = async (page) => {
 
     if (s2 && s2.asElement()) {
         await s2.click();
-        console.log('[EXPAND] ✅ Estratégia 2: Expandir clicado via SVG title.');
+        console.log('[EXPAND] Estrategia 2: Expandir clicado via SVG title.');
         await randomDelay(700, 1000);
         return true;
     }
 
-    // Estratégia 3: SVG path fragment único do ícone expandir
-    const s3 = await page.evaluateHandle(() => {
-        const match = Array.from(document.querySelectorAll('path'))
-            .find(p => (p.getAttribute('d') || '').startsWith('M10 20H4'));
-        if (!match) return null;
-        return match.closest('div[role="button"]') || match.closest('button');
+    // Estrategia 3: SVG path fragments do icone expandir/chevron
+    const expandPaths = ['M10 20H4', 'M8 12l4 4 4-4', 'M9 18l6-6-6-6', 'M10.75 16.82', 'M5 12h14'];
+    for (const frag of expandPaths) {
+        const s3 = await page.evaluateHandle((f) => {
+            const match = Array.from(document.querySelectorAll('path'))
+                .find(p => (p.getAttribute('d') || '').includes(f));
+            if (!match) return null;
+            return match.closest('div[role="button"]') || match.closest('button');
+        }, frag);
+
+        if (s3 && s3.asElement()) {
+            await s3.click();
+            console.log(`[EXPAND] Estrategia 3: Expandir clicado via SVG path: "${frag}".`);
+            await randomDelay(700, 1000);
+            return true;
+        }
+    }
+
+    // Estrategia 4: Posicional — botao com SVG a ESQUERDA do input (expand fica a esquerda do campo de texto)
+    const s4 = await page.evaluateHandle(() => {
+        const input = document.querySelector('div[contenteditable="true"], textarea, div[role="textbox"]');
+        if (!input) return null;
+        const inputRect = input.getBoundingClientRect();
+
+        const candidates = Array.from(document.querySelectorAll('div[role="button"], button'))
+            .filter(el => {
+                const r = el.getBoundingClientRect();
+                return (
+                    r.width > 0 && r.width < 70 &&
+                    r.height > 0 && r.height < 70 &&
+                    r.right <= inputRect.left + 5 &&
+                    Math.abs((r.top + r.height / 2) - (inputRect.top + inputRect.height / 2)) < 30 &&
+                    el.querySelector('svg')
+                );
+            })
+            .sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left);
+
+        console.log('[EXPAND Posicional] Candidatos a esquerda do input:', JSON.stringify(
+            candidates.map(el => ({
+                label: el.getAttribute('aria-label') || '',
+                x: Math.round(el.getBoundingClientRect().left)
+            }))
+        ));
+
+        return candidates[0] || null;
     });
 
-    if (s3 && s3.asElement()) {
-        await s3.click();
-        console.log('[EXPAND] ✅ Estratégia 3: Expandir clicado via SVG path.');
+    if (s4 && s4.asElement()) {
+        await s4.click();
+        console.log('[EXPAND] Estrategia 4: Expandir clicado via posicao (botao mais a esquerda do input).');
         await randomDelay(700, 1000);
         return true;
     }
 
-    console.log('[EXPAND] ⚠️ Botão Expandir não encontrado — continuando mesmo assim.');
+    // DIAGNOSTICO: logar todos os botoes visiveis para debug
+    const visibleButtons = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[aria-label], button, div[role="button"]'))
+            .map(el => ({
+                tag: el.tagName,
+                label: el.getAttribute('aria-label') || (el.textContent || '').trim().substring(0, 30),
+                w: Math.round(el.offsetWidth),
+                h: Math.round(el.offsetHeight),
+                x: Math.round(el.getBoundingClientRect().left)
+            }))
+            .filter(x => x.w > 0 && x.h > 0 && x.w < 120)
+    );
+    console.log('[EXPAND] Botao Expandir NAO encontrado. Botoes visiveis:');
+    console.table(visibleButtons);
     return false;
 };
 
@@ -594,46 +647,59 @@ const waitChatLoaded = async (page, timeout = 20000) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const sendDM = async (page, username, message, audios = []) => {
     try {
-        // 1. Find Message Button on profile
-        const msgBtn = await page.evaluateHandle((texts) => {
-            const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
-            return buttons.find(b => {
-                const text = b.textContent.toLowerCase().trim();
-                return texts.some(t => text === t || text.includes(t));
-            });
-        }, TEXTS.MESSAGE);
+        // ── Detect if we are already inside the DM chat for this user ──────────
+        // This happens when sendDM is called multiple times for the same person
+        // (e.g. text message first, then @audio). In that case we skip opening
+        // the chat and go straight to sending.
+        const currentUrl = page.url();
+        const alreadyInChat = currentUrl.includes('/direct/') ||
+            !!(await page.$('div[contenteditable="true"], textarea, div[role="textbox"]'));
 
-        if (!msgBtn || !msgBtn.asElement()) {
-            console.log('[DM] Message button not found on profile.');
-            return false;
-        }
+        if (!alreadyInChat) {
+            // 1. Find Message Button on profile
+            const msgBtn = await page.evaluateHandle((texts) => {
+                const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
+                return buttons.find(b => {
+                    const text = b.textContent.toLowerCase().trim();
+                    return texts.some(t => text === t || text.includes(t));
+                });
+            }, TEXTS.MESSAGE);
 
-        // 2. Click Message button
-        await humanMove(page);
-        const navPromise = page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => { });
-        await msgBtn.click();
-        await navPromise;
-
-        // 3. Wait for chat input (dismiss popups)
-        let chatOpen = false;
-        for (let i = 0; i < 20; i++) {
-            const notNowBtn = await page.evaluateHandle((texts) => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                return buttons.find(b => texts.some(t => (b.innerText || '').toLowerCase().includes(t)));
-            }, TEXTS.NOT_NOW);
-            if (notNowBtn && notNowBtn.asElement()) {
-                await notNowBtn.click();
-                await randomDelay(1000, 2000);
+            if (!msgBtn || !msgBtn.asElement()) {
+                console.log('[DM] Message button not found on profile.');
+                return false;
             }
 
-            const input = await page.$('div[contenteditable="true"], textarea, div[role="textbox"]');
-            if (input) { chatOpen = true; break; }
-            await randomDelay(500, 500);
-        }
+            // 2. Click Message button
+            await humanMove(page);
+            const navPromise = page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => { });
+            await msgBtn.click();
+            await navPromise;
 
-        if (!chatOpen) {
-            console.log('[DM] Chat window did not open.');
-            return false;
+            // 3. Wait for chat input (dismiss popups)
+            let chatOpen = false;
+            for (let i = 0; i < 20; i++) {
+                const notNowBtn = await page.evaluateHandle((texts) => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    return buttons.find(b => texts.some(t => (b.innerText || '').toLowerCase().includes(t)));
+                }, TEXTS.NOT_NOW);
+                if (notNowBtn && notNowBtn.asElement()) {
+                    await notNowBtn.click();
+                    await randomDelay(1000, 2000);
+                }
+
+                const input = await page.$('div[contenteditable="true"], textarea, div[role="textbox"]');
+                if (input) { chatOpen = true; break; }
+                await randomDelay(500, 500);
+            }
+
+            if (!chatOpen) {
+                console.log('[DM] Chat window did not open.');
+                return false;
+            }
+        } else {
+            console.log(`[DM] Already inside chat (${currentUrl.includes('/direct/') ? 'URL' : 'input detected'}) — skipping open step.`);
+            await randomDelay(500, 800); // Small stabilization pause
         }
 
         // 4. Audio message
