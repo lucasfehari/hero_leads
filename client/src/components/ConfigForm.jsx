@@ -11,8 +11,10 @@ const ConfigForm = ({ onStart, isRunning }) => {
         delayMin: 5,
         delayMax: 15,
         targetListEnabled: false,
-        targetList: ''
+        targetList: '',
+        excludedKeywords: [],
     });
+    const [excludedInput, setExcludedInput] = useState('');
     const [dmSteps, setDmSteps] = useState([]); // [{type:'text'|'audio', text?, audioBlob?, audioUrl?, audioFilename?, audioServerPath?}]
 
     const handleChange = (e) => {
@@ -383,6 +385,82 @@ const ConfigForm = ({ onStart, isRunning }) => {
                     <p className="text-xs text-slate-500 mt-1 ml-1">Hashtags: Onde o bot vai procurar. Palavras-Chave: O que o bot vai ler (Bios/Reels) para aprovar.</p>
                 </div>
             )}
+
+            {/* EXCLUDED KEYWORDS — Tag Input */}
+            <div
+                className="rounded-xl border p-4 space-y-3"
+                style={{ background: 'rgba(248,113,113,0.04)', borderColor: 'rgba(248,113,113,0.18)' }}
+            >
+                <div>
+                    <label className="flex items-center gap-2 text-sm font-semibold mb-1" style={{ color: '#fca5a5' }}>
+                        <span>🛡️</span> Palavras-chave para Ignorar
+                    </label>
+                    <p className="text-xs mb-3" style={{ color: '#64748b' }}>
+                        Usuários cujo username, nome ou bio contenham qualquer uma dessas palavras serão pulados automaticamente.
+                    </p>
+
+                    {/* Tag bubbles */}
+                    {(config.excludedKeywords || []).length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-3">
+                            {(config.excludedKeywords || []).map((kw, i) => (
+                                <span
+                                    key={i}
+                                    className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full"
+                                    style={{ background: 'rgba(248,113,113,0.14)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.25)' }}
+                                >
+                                    {kw}
+                                    <button
+                                        type="button"
+                                        disabled={isRunning}
+                                        onClick={() => setConfig(c => ({ ...c, excludedKeywords: c.excludedKeywords.filter((_, j) => j !== i) }))}
+                                        className="leading-none opacity-70 hover:opacity-100 transition-opacity"
+                                        style={{ fontSize: '0.85rem' }}
+                                    >×</button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Input row */}
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={excludedInput}
+                            onChange={e => setExcludedInput(e.target.value)}
+                            onKeyDown={e => {
+                                if ((e.key === 'Enter' || e.key === ',') && excludedInput.trim()) {
+                                    e.preventDefault();
+                                    const kw = excludedInput.toLowerCase().trim();
+                                    if (kw && !(config.excludedKeywords || []).includes(kw)) {
+                                        setConfig(c => ({ ...c, excludedKeywords: [...(c.excludedKeywords || []), kw] }));
+                                    }
+                                    setExcludedInput('');
+                                }
+                                if (e.key === 'Backspace' && !excludedInput && (config.excludedKeywords || []).length > 0) {
+                                    setConfig(c => ({ ...c, excludedKeywords: c.excludedKeywords.slice(0, -1) }));
+                                }
+            }}
+                            disabled={isRunning}
+                            placeholder="Digite e pressione Enter... (ex: concorrente, agência, bot)"
+                            className="flex-1 rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-all placeholder:text-slate-600"
+                            style={{ background: 'rgba(1,3,38,0.6)', border: '1px solid rgba(248,113,113,0.22)' }}
+                        />
+                        <button
+                            type="button"
+                            disabled={isRunning || !excludedInput.trim()}
+                            onClick={() => {
+                                const kw = excludedInput.toLowerCase().trim();
+                                if (kw && !(config.excludedKeywords || []).includes(kw)) {
+                                    setConfig(c => ({ ...c, excludedKeywords: [...(c.excludedKeywords || []), kw] }));
+                                }
+                                setExcludedInput('');
+                            }}
+                            className="px-3 py-2 rounded-lg text-sm font-semibold transition-all"
+                            style={{ background: 'rgba(248,113,113,0.15)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.25)' }}
+                        >+ Add</button>
+                    </div>
+                </div>
+            </div>
 
             <div className="space-y-4 pt-4 border-t border-white/5">
                 <div>
