@@ -232,10 +232,17 @@ function randomizePunctuation(text) {
 }
 
 function spinText(text) {
-    return text.replace(/\{([^{}]+)\}/g, (_, content) => {
+    let msg = text.replace(/\{([^{}]+)\}/g, (_, content) => {
         const choices = content.split('|');
         return choices[Math.floor(Math.random() * choices.length)];
     });
+    
+    if (msg.includes('|')) {
+        const choices = msg.split('|');
+        msg = choices[Math.floor(Math.random() * choices.length)].trim();
+    }
+    
+    return msg;
 }
 
 function humanizeMessage(text, options = {}) {

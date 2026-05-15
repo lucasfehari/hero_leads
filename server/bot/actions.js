@@ -10,8 +10,10 @@ const TEXTS = {
     COMMENT: ['comment', 'comentar', 'comentario', 'kommentieren', 'commenta'],
     NOT_NOW: ['not now', 'agora não', 'ahora no', 'plus tard', 'jetzt nicht', 'non ora'],
     MIC: [
-        // Português
-        'clipe de voz', 'clipes de voz', 'mensagem de voz', 'áudio',
+        // PT-BR confirmado no DOM — aria-label primário
+        'clipe de voz',
+        // Português (outros)
+        'clipes de voz', 'mensagem de voz', 'áudio',
         // Inglês
         'voice clip', 'voice message', 'audio clip', 'hold to record',
         // Espanhol / Francês / Italiano / Alemão
@@ -136,11 +138,12 @@ const findMicButton = async (page) => {
 
     // ── Estratégia 2: SVG path fragment (ícone de microfone) ─────────────────
     const micPathFragments = [
-        'M12 15.745a4 4',
+        'M12 15.745a4 4',       // path principal do mic (PT-BR confirmado)
+        'M19.5 10.671v.897',    // path do arco superior (confirmado no DOM)
         'M12 1a4 4 0 0 0-4 4v7',
         'a4 4 0 0 1 8 0v5',
         'M12 18.25a6.25',
-        'M19 11a7 7',    // microfone alternativo
+        'M19 11a7 7',           // microfone alternativo
     ];
 
     for (const frag of micPathFragments) {
@@ -199,64 +202,73 @@ const findMicButton = async (page) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FIND SEND BUTTON — mirrors findMicButton, 3-strategy cascade
+// FIND SEND BUTTON — 4-strategy cascade (PT-BR + EN)
 // ─────────────────────────────────────────────────────────────────────────────
 const findSendButton = async (page) => {
-    // The exact SVG path fragment from the user's HTML DOM of the audio send button.
-    // This is UNIQUE to the audio send arrow — the text send button has a different path.
-    const SEND_PATH_FRAGMENT = 'M22.513 3.576';
 
-    // ── Strategy 1 (PRIMARY): SVG path fragment — most specific, avoids false positives ──
-    const s1 = await page.evaluateHandle((frag) => {
-        const match = Array.from(document.querySelectorAll('path'))
-            .find(p => (p.getAttribute('d') || '').startsWith(frag));
-        if (!match) return null;
-        return match.closest('div[role="button"]') || match.closest('button') || match.closest('svg');
-    }, SEND_PATH_FRAGMENT);
+    // ── Estratégia 1 (PRIMÁRIA): aria-label "Enviar" ou "Send" no div pai ────
+    // O Instagram PT-BR coloca aria-label="Enviar" no div[role="button"] pai,
+    // NÃO dentro do SVG. Esta estratégia acerta direto no elemento clicável real.
+    const s1 = await page.evaluateHandle(() => {
+        const labels = ['enviar', 'send'];
+        for (const el of Array.from(document.querySelectorAll('[aria-label]'))) {
+            const lbl = (el.getAttribute('aria-label') || '').toLowerCase().trim();
+            if (labels.includes(lbl)) {
+                const btn = el.closest('div[role="button"]') || el.closest('button') || el;
+                const r = btn.getBoundingClientRect();
+                if (r.width > 0 && r.width < 120 && r.height > 0) return btn;
+            }
+        }
+        return null;
+    });
 
     if (s1 && s1.asElement()) {
-        console.log('[SEND] ✅ Estratégia 1: Encontrado via SVG path fragment (mais específico).');
+        console.log('[SEND] ✅ Estratégia 1: Encontrado via aria-label Enviar/Send.');
         return s1;
     }
 
-    // ── Strategy 2: SVG <title>Send</title> ───────────────────────────────────
+    // ── Estratégia 2: SVG path fragment confirmado no DOM ────────────────────
     const s2 = await page.evaluateHandle(() => {
-        const titles = Array.from(document.querySelectorAll('svg title'));
-        const sendTitle = titles.find(t => t.textContent.trim().toLowerCase() === 'send');
-        if (!sendTitle) return null;
-        return sendTitle.closest('div[role="button"]') || sendTitle.closest('button');
+        const frag = 'M22.513 3.576';
+        const match = Array.from(document.querySelectorAll('path'))
+            .find(p => (p.getAttribute('d') || '').startsWith(frag));
+        if (!match) return null;
+        return match.closest('div[role="button"]') || match.closest('button');
     });
 
     if (s2 && s2.asElement()) {
-        console.log('[SEND] ✅ Estratégia 2: Encontrado via SVG <title>Send</title>.');
+        console.log('[SEND] ✅ Estratégia 2: Encontrado via SVG path fragment.');
         return s2;
     }
 
-    // ── Strategy 3: Positional — rightmost small button to the right of input ─
+    // ── Estratégia 3: SVG <title> Send ou Enviar (bilingue) ──────────────────
     const s3 = await page.evaluateHandle(() => {
-        const input = document.querySelector('div[contenteditable="true"], textarea, div[role="textbox"]');
-        if (!input) return null;
-        const inputRect = input.getBoundingClientRect();
-
-        const candidates = Array.from(document.querySelectorAll('div[role="button"], button'))
-            .filter(el => {
-                const r = el.getBoundingClientRect();
-                return (
-                    r.width > 0 && r.width < 120 &&
-                    r.height > 0 &&
-                    r.left >= inputRect.right - 10 &&
-                    Math.abs((r.top + r.height / 2) - (inputRect.top + inputRect.height / 2)) < 40 &&
-                    el.querySelector('svg')
-                );
-            })
-            .sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left); // rightmost first
-
-        return candidates[0] || null;
+        const validTitles = ['send', 'enviar'];
+        const title = Array.from(document.querySelectorAll('svg title'))
+            .find(t => validTitles.includes(t.textContent.trim().toLowerCase()));
+        if (!title) return null;
+        return title.closest('div[role="button"]') || title.closest('button');
     });
 
     if (s3 && s3.asElement()) {
-        console.log('[SEND] ✅ Estratégia 3: Encontrado via posição (botão à direita do input).');
+        console.log('[SEND] ✅ Estratégia 3: Encontrado via SVG title Send/Enviar.');
         return s3;
+    }
+
+    // ── Estratégia 4: Posicional — botão com SVG mais à direita na tela ──────
+    const s4 = await page.evaluateHandle(() => {
+        const candidates = Array.from(document.querySelectorAll('div[role="button"], button'))
+            .filter(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.width < 120 && r.height > 0 && el.querySelector('svg');
+            })
+            .sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left);
+        return candidates[0] || null;
+    });
+
+    if (s4 && s4.asElement()) {
+        console.log('[SEND] ✅ Estratégia 4: Encontrado via posição (rightmost button).');
+        return s4;
     }
 
     console.log('[SEND] ❌ Botão Enviar não encontrado em nenhuma estratégia.');
@@ -491,6 +503,93 @@ const sendAudioHelper = async (page, audioPath) => {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CLICK EXPAND BUTTON — obrigatório antes de buscar o microfone
+// ─────────────────────────────────────────────────────────────────────────────
+const clickExpandButton = async (page) => {
+    // Estratégia 1: aria-label="Expandir" (PT) ou "Expand" (EN)
+    const expandLabels = ['expandir', 'expand', 'more options', 'mais opções'];
+
+    const s1 = await page.evaluateHandle((labels) => {
+        for (const el of Array.from(document.querySelectorAll('[aria-label]'))) {
+            const lbl = (el.getAttribute('aria-label') || '').toLowerCase().trim();
+            if (labels.includes(lbl)) {
+                const btn = el.closest('div[role="button"]') || el.closest('button');
+                if (btn) return btn;
+            }
+        }
+        return null;
+    }, expandLabels);
+
+    if (s1 && s1.asElement()) {
+        await s1.click();
+        console.log('[EXPAND] ✅ Estratégia 1: Expandir clicado via aria-label.');
+        await randomDelay(700, 1000);
+        return true;
+    }
+
+    // Estratégia 2: <title>Expandir</title> dentro do SVG
+    const s2 = await page.evaluateHandle(() => {
+        const titles = Array.from(document.querySelectorAll('svg title'));
+        const t = titles.find(el => ['expandir', 'expand'].includes(el.textContent.trim().toLowerCase()));
+        if (!t) return null;
+        return t.closest('div[role="button"]') || t.closest('button');
+    });
+
+    if (s2 && s2.asElement()) {
+        await s2.click();
+        console.log('[EXPAND] ✅ Estratégia 2: Expandir clicado via SVG title.');
+        await randomDelay(700, 1000);
+        return true;
+    }
+
+    // Estratégia 3: SVG path fragment único do ícone expandir
+    const s3 = await page.evaluateHandle(() => {
+        const match = Array.from(document.querySelectorAll('path'))
+            .find(p => (p.getAttribute('d') || '').startsWith('M10 20H4'));
+        if (!match) return null;
+        return match.closest('div[role="button"]') || match.closest('button');
+    });
+
+    if (s3 && s3.asElement()) {
+        await s3.click();
+        console.log('[EXPAND] ✅ Estratégia 3: Expandir clicado via SVG path.');
+        await randomDelay(700, 1000);
+        return true;
+    }
+
+    console.log('[EXPAND] ⚠️ Botão Expandir não encontrado — continuando mesmo assim.');
+    return false;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WAIT CHAT LOADED — polling até Loading... sumir do DOM
+// ─────────────────────────────────────────────────────────────────────────────
+const waitChatLoaded = async (page, timeout = 20000) => {
+    console.log('[CHAT] Aguardando chat carregar completamente...');
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+        const ready = await page.evaluate(() => {
+            const loadingEls = Array.from(document.querySelectorAll('[aria-label]'))
+                .filter(el => {
+                    const lbl = (el.getAttribute('aria-label') || '').toLowerCase();
+                    return lbl === 'loading...' && el.offsetWidth > 0;
+                });
+            const hasInput = !!document.querySelector(
+                'div[contenteditable="true"], textarea, div[role="textbox"]'
+            );
+            return loadingEls.length === 0 && hasInput;
+        });
+        if (ready) {
+            console.log('[CHAT] ✅ Chat carregado.');
+            return true;
+        }
+        await randomDelay(500, 500);
+    }
+    console.log('[CHAT] ⚠️ Timeout aguardando chat — continuando mesmo assim.');
+    return false;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SEND DM — main entry point
 // ─────────────────────────────────────────────────────────────────────────────
 const sendDM = async (page, username, message, audios = []) => {
@@ -547,15 +646,23 @@ const sendDM = async (page, username, message, audios = []) => {
                 return false;
             }
             console.log(`[DM] Chat opened. Identified audio command for file: ${audioConfig.path}.`);
+
+            // CRÍTICO: aguardar Loading... sumir antes de qualquer ação no chat
+            await waitChatLoaded(page);
+
             console.log('[DM] Clicking input field once to ensure chat bar is focused (without typing) to make mic visible...');
             const chatInputForFocus = await page.$('div[contenteditable="true"], textarea, div[role="textbox"]');
             if (chatInputForFocus) {
                 await chatInputForFocus.click();
-                await randomDelay(500, 1000); // give UI time to expand icons if needed
+                await randomDelay(500, 800);
                 console.log('[DM] Input field clicked.');
             } else {
                 console.log('[DM] Warning: Input field not found for click focus.');
             }
+
+            console.log('[DM] Clicando no botão Expandir para revelar o microfone...');
+            await clickExpandButton(page);
+            await randomDelay(800, 1200); // dar tempo ao DOM renderizar botões pós-expand
 
             console.log('[DM] Proceeding to sendAudioHelper...');
             const audioSent = await sendAudioHelper(page, audioConfig.path);
@@ -614,4 +721,4 @@ const sendDM = async (page, username, message, audios = []) => {
     }
 };
 
-module.exports = { likePost, commentPost, followUser, sendDM };
+module.exports = { likePost, commentPost, followUser, sendDM, clickExpandButton };

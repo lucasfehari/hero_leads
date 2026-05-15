@@ -5,7 +5,7 @@ const {
     getSessionWarmup, recordSend,
     simulateHumanActivity,
     loadBadNumbers, saveBadNumber, isValidWhatsAppNumber,
-    humanizeMessage,
+    humanizeMessage, spinText,
     checkRateLimits,
     shuffleContacts,
 } = antiBan;
@@ -215,10 +215,7 @@ class MessageQueue {
                         // ── Camada 5: Humanizar mensagem ──────────────────────────
                         const message = this.config.antiBanEnabled
                             ? humanizeMessage(textTemplate, { emojiPool: this.config.emojiPool })
-                            : textTemplate.replace(/\{([^{}]+)\}/g, (_, c) => {
-                                const opts = c.split('|');
-                                return opts[Math.floor(Math.random() * opts.length)];
-                            });
+                            : spinText(textTemplate);
 
                         // Simulação de digitação (typing indicator)
                         try {
