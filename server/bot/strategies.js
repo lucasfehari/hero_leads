@@ -1,6 +1,31 @@
 const { autoScroll, randomDelay, humanMove, scrollElement } = require('./utils');
 const { likePost } = require('./actions');
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KEYWORD EXCLUSION FILTER
+// ─────────────────────────────────────────────────────────────────────────────
+const isExcluded = (username, displayName, bio, excludedKeywords = []) => {
+    if (!excludedKeywords || excludedKeywords.length === 0) return false;
+
+    const fields = {
+        username: (username || '').toLowerCase(),
+        displayName: (displayName || '').toLowerCase(),
+        bio: (bio || '').toLowerCase(),
+    };
+
+    for (const keyword of excludedKeywords) {
+        const kw = keyword.toLowerCase().trim();
+        if (!kw) continue;
+        for (const [field, value] of Object.entries(fields)) {
+            if (value.includes(kw)) {
+                console.log(`[FILTER] ⛔ Skipped @${username} — keyword match: '${kw}' in ${field}`);
+                return true;
+            }
+        }
+    }
+    return false;
+};
+
 const searchByHashtag = async (page, tag, seenUrls, logCallback) => {
     logCallback(`Searching for hashtag: #${tag}`);
 
@@ -90,7 +115,7 @@ const browseProfile = async (page, username, logCallback) => {
     logCallback(`Finished browsing @${username}.`);
 };
 
-const analyzeProfile = async (page, username, keywords, logCallback) => {
+const analyzeProfile = async (page, username, keywords, logCallback, excludedKeywords = []) => {
     logCallback(`Analyzing profile: @${username}`);
 
     // Check if we are already on the profile page
@@ -103,30 +128,37 @@ const analyzeProfile = async (page, username, keywords, logCallback) => {
         await randomDelay(2000, 4000); // Wait for content to load if we just clicked
     }
 
-    // Get Bio and visible text
-    const bioStub = await page.evaluate(() => {
+    // Get Bio, displayName and visible text
+    const { bioStub, displayName } = await page.evaluate(() => {
         // Try meta description first
         const meta = document.querySelector('meta[property="og:description"]');
-        let text = meta ? meta.content : "";
+        let text = meta ? meta.content : '';
 
         // Fallback to page content headers (name, bio category)
         const h1 = document.querySelector('h1');
-        if (h1) text += " " + h1.parentElement.innerText;
+        const name = h1 ? h1.innerText.trim() : '';
+        if (h1) text += ' ' + h1.parentElement.innerText;
 
         // Also grab any visible text in the bio section
         const bioSection = document.querySelector('section main div header section');
-        if (bioSection) text += " " + bioSection.innerText;
+        if (bioSection) text += ' ' + bioSection.innerText;
 
-        return text;
+        return { bioStub: text, displayName: name };
     });
 
     logCallback(`Bio Text Extracted: "${bioStub.substring(0, 50)}..."`);
 
-    logCallback('Profile filtering DISABLED. Approving everyone.', 'success');
+    // ── Keyword exclusion check ────────────────────────────────────────────
+    if (isExcluded(username, displayName, bioStub, excludedKeywords)) {
+        logCallback(`[FILTER] ⛔ @${username} pulado por palavra-chave proibida.`, 'warning');
+        return false;
+    }
+
+    logCallback('Profile approved.', 'success');
     return true;
 };
 
-const exploreReels = async (page, keywords, logCallback) => {
+const exploreReels = async (page, keywords, logCallback, excludedKeywords = []) => {
     logCallback('Starting Reels Exploration...');
 
     // Go to Reels Feed (or generic explore if reels direct link fails)
@@ -196,8 +228,19 @@ const exploreReels = async (page, keywords, logCallback) => {
             logCallback('Reel matches criteria! Visiting author...');
 
             const profileUrl = `https://www.instagram.com${author}`;
-            logCallback(`Navigating to author: ${profileUrl}`);
+            const profileUsername = author.replace(/\//g, '');
 
+            // ── Keyword exclusion check (username + caption) ──────────────────────
+            if (isExcluded(profileUsername, '', caption, excludedKeywords)) {
+                logCallback(`[FILTER] ⛔ Reel author @${profileUsername} pulado por palavra-chave.`, 'warning');
+                noMatchCount++;
+                await page.keyboard.press('ArrowDown');
+                await randomDelay(2000, 4000);
+                reelsProcessed++;
+                continue;
+            }
+
+            logCallback(`Navigating to author: ${profileUrl}`);
             return profileUrl; // RETURN user to be processed by main loop (Action Chain)
         } else {
             if (relevant && !author) logCallback('Reel relevant but Author NOT found. Skipping.', 'warning');
@@ -222,4 +265,4 @@ const exploreReels = async (page, keywords, logCallback) => {
     return null; // Finished batch without finding anyone
 };
 
-module.exports = { searchByHashtag, analyzeProfile, browseProfile, exploreReels };
+module.exports = { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded };

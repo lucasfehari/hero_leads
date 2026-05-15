@@ -3,7 +3,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { executablePath } = require('puppeteer');
 const { login } = require('./login');
 const { randomDelay, smartClick, autoScroll, humanMove } = require('./utils');
-const { searchByHashtag, analyzeProfile, browseProfile, exploreReels } = require('./strategies');
+const { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded } = require('./strategies');
 const { followUser, likePost, commentPost, sendDM } = require('./actions');
 const { hasInteracted, recordInteraction } = require('./history_db');
 
@@ -40,6 +40,7 @@ class BotEngine {
 
         this.config = config;
         this.logCallback = logCallback;
+        this.excludedKeywords = [];
         this.isRunning = true;
 
         try {
@@ -98,13 +99,27 @@ class BotEngine {
                 ? this.config.interestKeywords.split(/[, \n]+/).map(k => k.trim()).filter(k => k)
                 : hashtags; // Fallback to hashtags if no specific keywords set
 
+            // 4. Excluded Keywords (block users whose username/name/bio matches)
+            const excludedKeywords = Array.isArray(this.config.excludedKeywords)
+                ? this.config.excludedKeywords
+                : (this.config.excludedKeywords || '')
+                    .split(',')
+                    .map(k => k.toLowerCase().trim())
+                    .filter(k => k);
+
+            this.excludedKeywords = excludedKeywords; // persistir na instância para interactWithProfile()
+
+            if (excludedKeywords.length > 0) {
+                this.log(`Keyword exclusion filter active: [${excludedKeywords.join(', ')}]`);
+            }
+
             if (customList.length > 0) {
                 this.log(`Target List Enabled: ${customList.length} users loaded.`);
-                await this.runLoop([], [], customList);
+                await this.runLoop([], [], customList, excludedKeywords);
             } else if (hashtags.length === 0 && !this.config.onlyReels) {
                 this.log('No targets or hashtags provided. Cannot start search loop.', 'warning');
             } else {
-                await this.runLoop(hashtags, interestKeywords, []);
+                await this.runLoop(hashtags, interestKeywords, [], excludedKeywords);
             }
 
         } catch (error) {
@@ -117,7 +132,7 @@ class BotEngine {
     /**
      * Main Automation Loop
      */
-    async runLoop(keywords, interestKeywords, customList = []) {
+    async runLoop(keywords, interestKeywords, customList = [], excludedKeywords = []) {
         this.strategyState = 'hashtags'; // 'hashtags', 'reels', 'custom_list'
         const seenHashtagPosts = new Set(); // Session memory for hashtags
 
@@ -165,7 +180,7 @@ class BotEngine {
                         // Use keywords if available, otherwise pass empty array (browse all)
                         const searchKeywords = this.config.onlyReels && keywords.length === 0 ? [] : keywords;
 
-                        const profileUrl = await exploreReels(this.page, searchKeywords, (msg, type) => this.log(msg, type));
+                        const profileUrl = await exploreReels(this.page, searchKeywords, (msg, type) => this.log(msg, type), excludedKeywords);
 
                         if (profileUrl) {
                             // We found a lead in Reels! Process them.
@@ -397,7 +412,7 @@ class BotEngine {
         const keywords = this.config.keywords ? this.config.keywords.split(',') : [];
 
         // 1. Analyze
-        const context = await analyzeProfile(this.page, username, keywords, this.logCallback);
+        const context = await analyzeProfile(this.page, username, keywords, this.logCallback, this.excludedKeywords || []);
 
         if (!context) {
             this.log(`Skipping @${username} (Criteria Not Met).`);
