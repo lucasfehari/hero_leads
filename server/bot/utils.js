@@ -178,4 +178,19 @@ const smartClick = async (page, elementHandle) => {
     }
 };
 
-module.exports = { randomDelay, humanType, autoScroll, humanMove, scrollElement, smartClick };
+function spinText(text) {
+    if (!text) return '';
+    let msg = text.replace(/\{([^{}]+)\}/g, (_, content) => {
+        const choices = content.split('|');
+        return choices[Math.floor(Math.random() * choices.length)];
+    });
+    
+    if (msg.includes('|')) {
+        const choices = msg.split('|');
+        msg = choices[Math.floor(Math.random() * choices.length)].trim();
+    }
+    
+    return msg;
+}
+
+module.exports = { randomDelay, humanType, autoScroll, humanMove, scrollElement, smartClick, spinText };

@@ -2,7 +2,7 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { executablePath } = require('puppeteer');
 const { login } = require('./login');
-const { randomDelay, smartClick, autoScroll, humanMove } = require('./utils');
+const { randomDelay, smartClick, autoScroll, humanMove, spinText } = require('./utils');
 const { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded } = require('./strategies');
 const { followUser, likePost, commentPost, sendDM } = require('./actions');
 const { hasInteracted, recordInteraction } = require('./history_db');
@@ -439,9 +439,8 @@ class BotEngine {
         await this.humanPause('action_gap');
 
         // 4. Like & Comment (if configured)
-        // Split by pipe '|' to allow commas in the actual message
-        const comments = this.config.commentTemplate ? this.config.commentTemplate.split('|') : [];
-        if (comments.length > 0) {
+        const commentText = this.config.commentTemplate ? spinText(this.config.commentTemplate) : '';
+        if (commentText) {
             // Must find a post to comment on
             const latestPost = await this.page.$('a[href*="/p/"]');
             if (latestPost) {
@@ -454,8 +453,6 @@ class BotEngine {
                     await randomDelay(2000, 4000);
                 }
 
-                // Pick random comment
-                const commentText = comments[Math.floor(Math.random() * comments.length)].trim();
                 this.log(`Commenting: "${commentText}"`);
 
                 const commented = await commentPost(this.page, commentText);
@@ -472,9 +469,8 @@ class BotEngine {
             // Support Multiple Messages per Person using ';;;' separator
             // Example: "Hi! ;;; How are you?" -> Sends "Hi!", waits, then sends "How are you?"
 
-            // First, pick a VARIATION from the pipe '|' Spintax
-            const dms = this.config.dmTemplate.split('|');
-            const chosenTemplate = dms[Math.floor(Math.random() * dms.length)].trim();
+            // First, process the template with our robust spinText helper (handles {A|B} spintax and fallback pipe '|')
+            const chosenTemplate = spinText(this.config.dmTemplate);
 
             // Now check if this chosen template has multiple parts (;;;)
             const messagesToSend = chosenTemplate.split(';;;').map(m => m.trim()).filter(m => m);
