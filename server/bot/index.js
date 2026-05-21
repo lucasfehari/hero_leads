@@ -3,7 +3,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { executablePath } = require('puppeteer');
 const { login } = require('./login');
 const { randomDelay, smartClick, autoScroll, humanMove, spinText } = require('./utils');
-const { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded } = require('./strategies');
+const { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded, generateHashtagsFromPrompt } = require('./strategies');
 const { followUser, likePost, commentPost, sendDM } = require('./actions');
 const { hasInteracted, recordInteraction } = require('./history_db');
 
@@ -89,7 +89,7 @@ class BotEngine {
             }
 
             // 1. Hashtags (Where to search)
-            const hashtags = this.config.hashtags
+            let hashtags = this.config.hashtags
                 ? this.config.hashtags.split(/[, \n]+/).map(k => k.trim().replace('#', '')).filter(k => k)
                 : [];
 
@@ -116,10 +116,32 @@ class BotEngine {
             if (customList.length > 0) {
                 this.log(`Target List Enabled: ${customList.length} users loaded.`);
                 await this.runLoop([], [], customList, excludedKeywords);
-            } else if (hashtags.length === 0 && !this.config.onlyReels) {
-                this.log('No targets or hashtags provided. Cannot start search loop.', 'warning');
             } else {
-                await this.runLoop(hashtags, interestKeywords, [], excludedKeywords);
+                // 4.5 AI Campaign Planning Phase (Generate Hashtags)
+                if (this.config.aiMode && this.config.openRouterKey && hashtags.length === 0 && !this.config.onlyReels) {
+                    this.log('Planejando a campanha com I.A. (Gerando hashtags a partir do prompt)...');
+                    const generatedHashtags = await generateHashtagsFromPrompt(
+                        this.config.aiPrompt, 
+                        this.config.openRouterKey, 
+                        this.config.openRouterModel, 
+                        (msg, type) => this.log(msg, type)
+                    );
+                    
+                    if (generatedHashtags && generatedHashtags.length > 0) {
+                        this.log(`I.A. sugeriu as hashtags: [${generatedHashtags.join(', ')}]`, 'success');
+                        hashtags = generatedHashtags;
+                        this.config.hashtags = generatedHashtags.join(','); // Store for strategy switcher
+                    } else {
+                        this.log('Falha ao gerar hashtags com I.A. Usando exploração de Reels como fallback.', 'warning');
+                        this.config.onlyReels = true;
+                    }
+                }
+
+                if (hashtags.length === 0 && !this.config.onlyReels) {
+                    this.log('No targets or hashtags provided. Cannot start search loop.', 'warning');
+                } else {
+                    await this.runLoop(hashtags, interestKeywords, [], excludedKeywords);
+                }
             }
 
         } catch (error) {
@@ -413,15 +435,16 @@ class BotEngine {
      * Interact with the profile
      */
     async interactWithProfile(username) {
-        const keywords = this.config.keywords ? this.config.keywords.split(',') : [];
-
         // 1. Analyze
-        const context = await analyzeProfile(this.page, username, keywords, this.logCallback, this.excludedKeywords || []);
+        const analyzeResult = await analyzeProfile(this.page, username, this.config, this.logCallback, this.excludedKeywords || []);
 
-        if (!context) {
+        if (!analyzeResult || (typeof analyzeResult === 'object' && !analyzeResult.approved)) {
             this.log(`Skipping @${username} (Criteria Not Met).`);
             return;
         }
+        
+        const aiMessage = typeof analyzeResult === 'object' ? analyzeResult.aiMessage : null;
+        const aiActions = typeof analyzeResult === 'object' ? analyzeResult.actions : null;
 
         this.log(`Criteria Met for @${username}. Initiating Interaction Sequence.`, 'success');
 
@@ -432,14 +455,29 @@ class BotEngine {
         await this.humanPause('contemplation');
 
         // 3. Follow
-        const followed = await followUser(this.page);
-        if (followed) this.log(`Successfully Followed @${username}`, 'success');
-
-        // CRITICAL: Long pause to avoid "bot-like" behavior detection
-        await this.humanPause('action_gap');
+        const shouldFollow = aiActions ? aiActions.shouldFollow !== false : true;
+        if (shouldFollow) {
+            const followed = await followUser(this.page);
+            if (followed) this.log(`Successfully Followed @${username}`, 'success');
+            // CRITICAL: Long pause to avoid "bot-like" behavior detection
+            await this.humanPause('action_gap');
+        } else {
+            this.log(`[AI Orchestrator] Skipped Follow.`);
+        }
 
         // 4. Like & Comment (if configured)
-        const commentText = this.config.commentTemplate ? spinText(this.config.commentTemplate) : '';
+        const shouldComment = aiActions ? aiActions.shouldComment !== false : true;
+        let commentText = '';
+        if (shouldComment) {
+             if (aiActions && aiActions.customComment) {
+                 commentText = aiActions.customComment;
+             } else if (this.config.commentTemplate) {
+                 commentText = spinText(this.config.commentTemplate);
+             }
+        } else {
+             this.log(`[AI Orchestrator] Skipped Comment.`);
+        }
+        
         if (commentText) {
             // Must find a post to comment on
             const latestPost = await this.page.$('a[href*="/p/"]');
@@ -464,13 +502,20 @@ class BotEngine {
             }
         }
 
-        // 5. DM (if configured)
-        if (this.config.dmTemplate) {
+        // 5. DM (if configured or AI generated)
+        const shouldDM = aiActions ? aiActions.shouldDM !== false : true;
+        
+        if (!shouldDM) {
+             this.log(`[AI Orchestrator] Skipped DM.`);
+        } else {
+            const effectiveDmTemplate = aiMessage || this.config.dmTemplate;
+            
+            if (effectiveDmTemplate) {
             // Support Multiple Messages per Person using ';;;' separator
             // Example: "Hi! ;;; How are you?" -> Sends "Hi!", waits, then sends "How are you?"
 
             // First, process the template with our robust spinText helper (handles {A|B} spintax and fallback pipe '|')
-            const chosenTemplate = spinText(this.config.dmTemplate);
+            const chosenTemplate = aiMessage ? aiMessage : spinText(effectiveDmTemplate);
 
             // Now check if this chosen template has multiple parts (;;;)
             const messagesToSend = chosenTemplate.split(';;;').map(m => m.trim()).filter(m => m);
@@ -497,6 +542,13 @@ class BotEngine {
             } else {
                 this.log(`DM failed or restricted for @${username}`, 'warning');
             }
+            } // closes if (effectiveDmTemplate)
+        } // Closes the shouldDM else block
+
+        // 6. Sleep Extra
+        if (aiActions && aiActions.sleepAfterMs) {
+            this.log(`[AI Orchestrator] Pause extra de ${aiActions.sleepAfterMs}ms solicitada.`);
+            await randomDelay(aiActions.sleepAfterMs, aiActions.sleepAfterMs + 1000);
         }
 
         // Record the interaction in DB to never visit again

@@ -26,6 +26,55 @@ const isExcluded = (username, displayName, bio, excludedKeywords = []) => {
     return false;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AI CAMPAIGN PLANNING (Pre-Search)
+// ─────────────────────────────────────────────────────────────────────────────
+const generateHashtagsFromPrompt = async (prompt, apiKey, modelName, logCallback) => {
+    if (!prompt || !apiKey) return [];
+    
+    logCallback('[AI] Gerando hashtags a partir do seu prompt...');
+    
+    try {
+        const systemPrompt = `Você é um estrategista de marketing no Instagram. 
+O usuário vai te dar um objetivo de prospecção.
+Sua função é devolver APENAS um objeto JSON com uma lista de 5 hashtags extremamente relevantes para encontrar esse público-alvo no Instagram. 
+As hashtags NÃO devem conter o caractere "#" e devem ser focadas (exemplo: nichos de negócios locais, profissionais).
+Formato obrigatório:
+{ "hashtags": ["exemplo1", "exemplo2", "exemplo3"] }`;
+
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: modelName || "openai/gpt-4o-mini",
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: `Objetivo da Prospecção: "${prompt}"` }
+                ]
+            })
+        });
+
+        const data = await response.json();
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+            let aiResponseText = data.choices[0].message.content.trim();
+            if (aiResponseText.startsWith('\`\`\`json')) {
+                aiResponseText = aiResponseText.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim();
+            }
+            const aiJson = JSON.parse(aiResponseText);
+            
+            if (aiJson.hashtags && Array.isArray(aiJson.hashtags) && aiJson.hashtags.length > 0) {
+                return aiJson.hashtags.map(t => t.replace('#', '').trim());
+            }
+        }
+    } catch (e) {
+        logCallback(`[AI] Erro ao gerar hashtags: ${e.message}`, 'error');
+    }
+    return [];
+};
+
 const searchByHashtag = async (page, tag, seenUrls, logCallback) => {
     logCallback(`Searching for hashtag: #${tag}`);
 
@@ -115,7 +164,7 @@ const browseProfile = async (page, username, logCallback) => {
     logCallback(`Finished browsing @${username}.`);
 };
 
-const analyzeProfile = async (page, username, keywords, logCallback, excludedKeywords = []) => {
+const analyzeProfile = async (page, username, config, logCallback, excludedKeywords = []) => {
     logCallback(`Analyzing profile: @${username}`);
 
     // Check if we are already on the profile page
@@ -151,11 +200,91 @@ const analyzeProfile = async (page, username, keywords, logCallback, excludedKey
     // ── Keyword exclusion check ────────────────────────────────────────────
     if (isExcluded(username, displayName, bioStub, excludedKeywords)) {
         logCallback(`[FILTER] ⛔ @${username} pulado por palavra-chave proibida.`, 'warning');
-        return false;
+        return { approved: false };
     }
 
-    logCallback('Profile approved.', 'success');
-    return true;
+    if (config.aiMode && config.openRouterKey) {
+        logCallback(`[AI] Analisando perfil de @${username} com I.A. (OpenRouter)...`);
+        try {
+            const systemPrompt = `Você é o Cérebro Orquestrador de um Bot de Instagram.
+Seu objetivo é analisar as informações de um perfil (nome e bio) e decidir se é um bom lead baseado no prompt do usuário. Além disso, você deve coordenar QUAIS AÇÕES o bot deve tomar com esse lead, para que a lógica pareça humana e evite banimentos.
+
+REGRA DE IDIOMA CRÍTICA: Se você decidir gerar 'customComment' ou 'customMessage', o idioma DEVE OBRIGATORIAMENTE ser o mesmo idioma em que a Bio do perfil está escrita. (Ex: bio em inglês = responda em inglês, bio em espanhol = responda em espanhol).
+
+Responda APENAS com um objeto JSON válido, sem formatação markdown, contendo:
+{
+  "isLead": boolean (true se aprovar, false se não),
+  "actions": {
+    "shouldFollow": boolean,
+    "shouldLike": boolean,
+    "shouldComment": boolean,
+    "customComment": string (opcional, deixe vazio para usar o comentário manual do usuário),
+    "shouldDM": boolean,
+    "customMessage": string (opcional, deixe vazio para usar a sequência manual de DMs/Áudios do usuário),
+    "sleepAfterMs": number (milisegundos de pausa adicional após as interações para segurança, ex: 5000)
+  }
+}`;
+            
+            const userMessage = `Prompt do Usuário (Critérios e Instruções):
+"${config.aiPrompt}"
+
+Perfil Analisado:
+Username: @${username}
+Nome: ${displayName}
+Bio: ${bioStub}`;
+
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${config.openRouterKey}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: config.openRouterModel || "openai/gpt-4o-mini",
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userMessage }
+                    ]
+                })
+            });
+
+            const data = await response.json();
+            if (data.choices && data.choices[0] && data.choices[0].message) {
+                let aiResponseText = data.choices[0].message.content.trim();
+                if (aiResponseText.startsWith('\`\`\`json')) {
+                    aiResponseText = aiResponseText.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim();
+                }
+                const aiJson = JSON.parse(aiResponseText);
+                
+                if (aiJson.isLead && aiJson.actions) {
+                    logCallback(`[AI] ✅ Perfil aprovado! Ações: Follow(${aiJson.actions.shouldFollow}), DM(${aiJson.actions.shouldDM})`, 'success');
+                    return { approved: true, aiMessage: aiJson.actions.customMessage, actions: aiJson.actions };
+                } else {
+                    logCallback(`[AI] ❌ Perfil rejeitado pela I.A.`, 'warning');
+                    return { approved: false };
+                }
+            } else {
+                logCallback(`[AI] ⚠️ Erro na resposta da API OpenRouter. Retornando false.`, 'error');
+                return { approved: false };
+            }
+        } catch (error) {
+            logCallback(`[AI] ⚠️ Falha na requisição OpenRouter: ${error.message}`, 'error');
+            return { approved: false };
+        }
+    } else {
+        // Legacy keyword matching
+        const keywordsList = config.interestKeywords ? config.interestKeywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k) : [];
+        if (keywordsList.length > 0) {
+            const hasKeyword = keywordsList.some(k => bioStub.toLowerCase().includes(k) || displayName.toLowerCase().includes(k));
+            if (!hasKeyword) {
+                logCallback(`[FILTER] ⛔ @${username} pulado: Nenhuma keyword de interesse encontrada na Bio.`, 'warning');
+                return { approved: false };
+            }
+        }
+
+        logCallback('Profile approved (Keyword Mode).', 'success');
+        return { approved: true };
+    }
 };
 
 const exploreReels = async (page, keywords, logCallback, excludedKeywords = []) => {
@@ -295,4 +424,4 @@ const exploreReels = async (page, keywords, logCallback, excludedKeywords = []) 
     return null; // Finished batch without finding anyone
 };
 
-module.exports = { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded };
+module.exports = { searchByHashtag, analyzeProfile, browseProfile, exploreReels, isExcluded, generateHashtagsFromPrompt };

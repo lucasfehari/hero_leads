@@ -11,7 +11,26 @@ const getActiveProfile = () => activeProfile;
 const saveCookies = async (page, profileName) => {
     const name = profileName || activeProfile;
     const cookies = await page.cookies();
-    saveSession(name, cookies);
+
+    let username = null;
+    let profilePic = null;
+
+    try {
+        // Tenta extrair a foto de perfil da nav bar do Instagram ou do global data
+        const data = await page.evaluate(() => {
+            const img = document.querySelector('img[alt$="profile picture"]');
+            return {
+                pic: img ? img.src : null,
+                user: window._sharedData?.config?.viewer?.username || null
+            };
+        });
+        profilePic = data.pic;
+        username = data.user;
+    } catch (e) {
+        console.log('[Login] Error extracting profile info:', e.message);
+    }
+
+    saveSession(name, cookies, username, profilePic);
     console.log(`[Login] Session saved to DB: ${name}`);
 };
 

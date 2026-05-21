@@ -13,23 +13,36 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
         name        TEXT PRIMARY KEY,
         cookies     TEXT NOT NULL,
+        username    TEXT,
+        profile_pic TEXT,
         updated_at  TEXT DEFAULT (datetime('now', 'localtime'))
     );
 `);
+
+try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN username TEXT;`);
+    db.exec(`ALTER TABLE sessions ADD COLUMN profile_pic TEXT;`);
+} catch (e) {
+    // Columns might already exist
+}
 
 /**
  * Save (upsert) cookies for a profile.
  * @param {string} name  - Profile name (e.g. "filazilla")
  * @param {Array}  cookies - Array of Puppeteer cookie objects
  */
-const saveSession = (name, cookies) => {
+const saveSession = (name, cookies, username = null, profilePic = null) => {
+    // If username and profilePic are provided, update them. Otherwise, keep existing if possible, 
+    // but the easiest is just coalesce or do a conditional update. We'll do a simple update:
     db.prepare(`
-        INSERT INTO sessions (name, cookies, updated_at)
-        VALUES (?, ?, datetime('now','localtime'))
+        INSERT INTO sessions (name, cookies, username, profile_pic, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now','localtime'))
         ON CONFLICT(name) DO UPDATE SET
             cookies    = excluded.cookies,
+            username   = coalesce(excluded.username, sessions.username),
+            profile_pic = coalesce(excluded.profile_pic, sessions.profile_pic),
             updated_at = excluded.updated_at
-    `).run(name, JSON.stringify(cookies));
+    `).run(name, JSON.stringify(cookies), username, profilePic);
 };
 
 /**
@@ -48,7 +61,7 @@ const loadSession = (name) => {
  * @returns {string[]}
  */
 const listSessions = () => {
-    return db.prepare(`SELECT name, updated_at FROM sessions ORDER BY updated_at DESC`).all();
+    return db.prepare(`SELECT name, username, profile_pic, updated_at FROM sessions ORDER BY updated_at DESC`).all();
 };
 
 /**

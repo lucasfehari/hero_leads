@@ -3,7 +3,7 @@ import { Hash, User, MessageCircle, Send, PlayCircle, Users, Trash2, Brain } fro
 
 import DmWorkflowBuilder from './DmWorkflowBuilder';
 
-const ConfigForm = ({ onStart, isRunning }) => {
+const ThreadsConfigForm = ({ onStart, isRunning }) => {
     const [config, setConfig] = useState({
         keywords: '',
         competitors: '',
@@ -21,7 +21,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
 
     // Load saved config
     useEffect(() => {
-        const savedConfig = localStorage.getItem('instagramConfig');
+        const savedConfig = localStorage.getItem('threadsConfig');
         if (savedConfig) {
             try {
                 const parsed = JSON.parse(savedConfig);
@@ -32,7 +32,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
 
     // Save config on change
     useEffect(() => {
-        localStorage.setItem('instagramConfig', JSON.stringify(config));
+        localStorage.setItem('threadsConfig', JSON.stringify(config));
     }, [config]);
 
     const handleChange = (e) => {
@@ -119,12 +119,13 @@ const ConfigForm = ({ onStart, isRunning }) => {
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
 
-            {/* INSTAGRAM SESSION MANAGER */}
+            {/* THREADS SESSION MANAGER */}
+            
             <div className="rounded-xl border overflow-hidden" style={{ background: 'rgba(1,3,38,0.4)', borderColor: 'rgba(23,191,96,0.12)' }}>
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'rgba(23,191,96,0.1)' }}>
                     <label className="text-sm font-semibold flex items-center gap-2" style={{ color: '#BCF285' }}>
-                        <User className="w-4 h-4" style={{ color: '#17BF60' }} /> Contas Instagram
+                        <User className="w-4 h-4" style={{ color: '#17BF60' }} /> Contas Threads
                         <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'rgba(23,191,96,0.12)', color: '#17A655' }}>
                             {profiles.length} conta{profiles.length !== 1 ? 's' : ''}
                         </span>
@@ -153,10 +154,10 @@ const ConfigForm = ({ onStart, isRunning }) => {
                             type="button"
                             onClick={async () => {
                                 if (!newProfileName.trim()) return alert('Digite um nome para a conta!');
-                                alert('O navegador vai abrir. Faça login no Instagram e aguarde fechar sozinho!');
+                                alert('O navegador vai abrir na página do Threads. Faça login e aguarde o navegador fechar sozinho!');
                                 setIsLoggingIn(true);
                                 try {
-                                    const res = await fetch('http://localhost:3000/api/profiles/login', {
+                                    const res = await fetch('http://localhost:3000/api/profiles/login-threads', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ name: newProfileName.trim() })
@@ -292,30 +293,30 @@ const ConfigForm = ({ onStart, isRunning }) => {
             {/* AI PROSPECTING MODE */}
             <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5 space-y-3" style={config.aiMode ? { borderColor: 'rgba(56, 189, 248, 0.4)' } : {}}>
                 <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-sky-400 flex items-center gap-2">
-                        <Brain className="w-4 h-4 text-sky-400" /> Prospecção com I.A. (OpenRouter)
+                    <label className="text-sm font-medium text-white flex items-center gap-2">
+                        <Brain className="w-4 h-4 text-white" /> Prospecção com I.A. (OpenRouter)
                     </label>
                     <input
                         type="checkbox"
                         name="aiMode"
                         checked={config.aiMode || false}
                         onChange={(e) => setConfig({ ...config, aiMode: e.target.checked })}
-                        className="w-5 h-5 accent-sky-500 rounded cursor-pointer"
+                        className="w-5 h-5 accent-neutral-100 rounded cursor-pointer"
                         disabled={isRunning}
                     />
                 </div>
                 
                 {config.aiMode && (
                     <div className="space-y-4 pt-2 animate-in fade-in slide-in-from-top-2">
-                        <div className="bg-slate-800/50 p-3 rounded-lg border border-sky-500/20">
-                            <label className="text-xs text-sky-300 font-semibold mb-1 block">🎯 Objetivo da Campanha (Prompt Alvo)</label>
-                            <p className="text-[10px] text-slate-400 mb-2">Descreva exatamente que tipo de lead a IA deve buscar hoje.</p>
+                        <div className="bg-slate-800/50 p-3 rounded-lg border border-white/20">
+                            <label className="text-xs text-white font-semibold mb-1 block">🎯 Objetivo da Campanha (Prompt Alvo)</label>
+                            <p className="text-[10px] text-slate-400 mb-2">Descreva exatamente que tipo de lead a IA deve buscar hoje no Threads.</p>
                             <textarea
                                 name="aiPrompt"
                                 value={config.aiPrompt || ''}
                                 onChange={handleChange}
                                 rows={2}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all text-sm resize-none custom-scrollbar"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all text-sm resize-none custom-scrollbar"
                                 placeholder="Ex: Procure por donos de padarias em SP..."
                                 disabled={isRunning}
                             />
@@ -415,14 +416,14 @@ const ConfigForm = ({ onStart, isRunning }) => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="flex items-center gap-2 text-slate-400 mb-2 text-sm font-medium">
-                                <Hash className="w-4 h-4 text-emerald-500" /> Hashtags (Busca)
+                                <Hash className="w-4 h-4 text-white" /> Hashtags (Busca)
                             </label>
                             <input
                                 type="text"
                                 name="hashtags"
                                 value={config.hashtags || ''}
                                 onChange={handleChange}
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-slate-600"
+                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all placeholder:text-slate-600"
                                 placeholder="#marketing, #vendas"
                                 disabled={isRunning}
                             />
@@ -558,7 +559,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
                     disabled={isRunning}
                     className={`w-full flex justify-center items-center gap-2 py-4 rounded-xl font-bold text-lg transition-all shadow-lg ${isRunning
                         ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-900/20 hover:shadow-emerald-900/40 transform hover:-translate-y-0.5'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-white hover:to-teal-500 text-white shadow-emerald-900/20 hover:shadow-emerald-900/40 transform hover:-translate-y-0.5'
                         }`}
                 >
                     {isRunning ? (
@@ -574,4 +575,4 @@ const ConfigForm = ({ onStart, isRunning }) => {
     );
 };
 
-export default ConfigForm;
+export default ThreadsConfigForm;

@@ -17,6 +17,7 @@ whatsapp_sessions
 
 # Environment — nunca commitar .env real
 .env
+.env.*
 !.env.example
 
 
@@ -25,6 +26,10 @@ profiles_data/
 server/uploads/
 server/db/*.db
 server/db/*.db-journal
+server/db/*.sqlite
+server/db/*.sqlite3
+*.sqlite
+*.sqlite3
 server/instagram/cookies/*.json
 server/instagram/uploads/*
 # Screenshots / prints

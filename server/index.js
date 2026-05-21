@@ -13,6 +13,9 @@ const { removeInteraction } = require('./bot/history_db');
 const historyDb = require('./bot/history_db');
 const mapsDb = require('./db/maps_db');
 const sessionsDb = require('./db/sessions_db');
+const ThreadsBotEngine = require('./threads_bot/index');
+
+const threadsBotService = new ThreadsBotEngine();
 
 const app = express();
 const server = http.createServer(app);
@@ -106,7 +109,22 @@ app.post('/api/profiles/login', async (req, res) => {
         }
 
         const cookies = await page.cookies();
-        sessionsDb.saveSession(name, cookies);
+        
+        let username = null;
+        let profilePic = null;
+        try {
+            const data = await page.evaluate(() => {
+                const img = document.querySelector('img[alt$="profile picture"]');
+                return {
+                    pic: img ? img.src : null,
+                    user: window._sharedData?.config?.viewer?.username || null
+                };
+            });
+            profilePic = data.pic;
+            username = data.user;
+        } catch (e) {}
+
+        sessionsDb.saveSession(name, cookies, username, profilePic);
         await browser.close();
 
         console.log(`[System] Profile ${name} saved to DB.`);
@@ -114,6 +132,72 @@ app.post('/api/profiles/login', async (req, res) => {
 
     } catch (e) {
         console.error('Login Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/profiles/login-threads', async (req, res) => {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Profile name required' });
+
+    console.log(`[System] Launching browser for Threads login: ${name}`);
+
+    try {
+        const puppeteer = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        const { executablePath } = require('puppeteer');
+        puppeteer.use(StealthPlugin());
+
+        const browser = await puppeteer.launch({
+            headless: false,
+            executablePath: executablePath(),
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-infobars', '--window-position=0,0']
+        });
+
+        const page = await browser.newPage();
+
+        const client = await page.target().createCDPSession();
+        await client.send('Network.clearBrowserCookies');
+        await client.send('Network.clearBrowserCache');
+        await page.goto('https://www.threads.net/login', { waitUntil: 'networkidle2' });
+
+        console.log(`[System] Waiting for user to login to Threads (${name})...`);
+
+        try {
+            // Wait for URL to NOT be /login
+            await page.waitForFunction('!window.location.href.includes("/login")', { timeout: 300000 });
+            await new Promise(r => setTimeout(r, 4000));
+        } catch (e) {
+            await browser.close();
+            return res.status(408).json({ error: 'Login timeout or closed.' });
+        }
+
+        const cookies = await page.cookies();
+        
+        let username = null;
+        let profilePic = null;
+        try {
+            const data = await page.evaluate(() => {
+                const img = document.querySelector('img[alt*="profile picture"]') || document.querySelector('img[alt*="foto de perfil"]');
+                const profileLink = document.querySelector('a[href^="/@"]');
+                let user = null;
+                if (profileLink) {
+                    user = profileLink.getAttribute('href').replace('/', '').replace('@', '');
+                }
+                return { pic: img ? img.src : null, user: user };
+            });
+            profilePic = data.pic;
+            username = data.user;
+        } catch (e) {}
+
+        sessionsDb.saveSession(name, cookies, username, profilePic);
+        await browser.close();
+
+        console.log(`[System] Threads Profile ${name} saved to DB.`);
+        res.json({ success: true, profile: name });
+
+    } catch (e) {
+        console.error('Threads Login Error:', e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -163,6 +247,29 @@ app.post('/api/bot/upload-audio', uploadBotAudio.single('audio'), (req, res) => 
     // Now req.body.id IS available (after multer finishes)
     const slotId = req.body.id || 'unknown';
     res.json({ success: true, path: req.file.path, filename: req.file.filename, slotId });
+});
+
+app.post('/api/bot/test-ai', async (req, res) => {
+    const { key, model } = req.body;
+    if (!key) return res.status(400).json({ success: false, error: 'Chave não fornecida' });
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: model || "openai/gpt-4o-mini",
+                messages: [{ role: "user", content: "Responda apenas com a palavra 'OK'" }]
+            })
+        });
+        const data = await response.json();
+        if (data.choices && data.choices[0]) {
+            res.json({ success: true, reply: data.choices[0].message.content });
+        } else {
+            res.json({ success: false, error: data.error?.message || JSON.stringify(data) });
+        }
+    } catch (e) {
+        res.json({ success: false, error: e.message });
+    }
 });
 
 // Audio library — list all saved audios
@@ -215,6 +322,29 @@ app.post('/api/stop', async (req, res) => {
     try {
         await botService.stop();
         broadcastLog('Bot stopped by user.');
+        res.json({ status: 'stopped' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/threads/start', async (req, res) => {
+    try {
+        const config = req.body;
+        broadcastLog('Starting Threads bot with config: ' + JSON.stringify(config));
+        // Start in background
+        threadsBotService.start(config, broadcastLog).catch(e => console.error(e));
+        res.json({ status: 'started' });
+    } catch (error) {
+        broadcastLog('Error starting Threads bot: ' + error.message, 'error');
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/threads/stop', async (req, res) => {
+    try {
+        await threadsBotService.stop();
+        broadcastLog('Threads Bot stopped by user.');
         res.json({ status: 'stopped' });
     } catch (error) {
         res.status(500).json({ error: error.message });
