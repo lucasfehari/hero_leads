@@ -61,7 +61,7 @@ const loadSession = (name) => {
  * @returns {string[]}
  */
 const listSessions = () => {
-    return db.prepare(`SELECT name, username, profile_pic, updated_at FROM sessions ORDER BY updated_at DESC`).all();
+    return db.prepare(`SELECT name, username, profile_pic, updated_at, cookies FROM sessions ORDER BY updated_at DESC`).all();
 };
 
 /**

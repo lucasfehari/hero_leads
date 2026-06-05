@@ -56,7 +56,31 @@ const broadcastLog = (message, type = 'info') => {
 // Profile Management — SQLite-backed session store
 app.get('/api/profiles', (req, res) => {
     try {
-        const profiles = sessionsDb.listSessions(); // [{name, updated_at}]
+        const rows = sessionsDb.listSessions(); 
+        const profiles = rows.map(row => {
+            let isExpired = false;
+            let expiresAt = null;
+            try {
+                const cookies = JSON.parse(row.cookies);
+                const sessionIdCookie = cookies.find(c => c.name === 'sessionid');
+                if (sessionIdCookie && sessionIdCookie.expires) {
+                    expiresAt = sessionIdCookie.expires * 1000; // Convert to JS ms
+                    isExpired = expiresAt < Date.now();
+                } else {
+                    isExpired = true; // Missing sessionid means invalid
+                }
+            } catch (e) {
+                isExpired = true;
+            }
+            return {
+                name: row.name,
+                username: row.username,
+                profile_pic: row.profile_pic,
+                updated_at: row.updated_at,
+                expiresAt,
+                isExpired
+            };
+        });
         res.json({ profiles });
     } catch (e) {
         res.status(500).json({ error: e.message });

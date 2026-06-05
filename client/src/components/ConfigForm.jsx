@@ -50,6 +50,13 @@ const ConfigForm = ({ onStart, isRunning }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
+        // Bloquear início caso o perfil selecionado esteja expirado
+        const currentProfile = profiles.find(p => p.name === selectedProfile);
+        if (currentProfile && currentProfile.isExpired) {
+            alert('A sessão deste perfil está expirada pelo Instagram! Por favor, apague a conta e faça o login novamente para renovar os cookies.');
+            return;
+        }
+
         // Serialize dmSteps → dmTemplate string (;;;) and upload new audio blobs
         const finalAudios = [];
         const parts = [];
@@ -203,17 +210,29 @@ const ConfigForm = ({ onStart, isRunning }) => {
                     {profiles.map(p => {
                         const name = typeof p === 'object' ? p.name : p;
                         const updatedAt = typeof p === 'object' ? p.updated_at : null;
+                        const isExpired = typeof p === 'object' ? p.isExpired : false;
+                        const expiresAt = typeof p === 'object' ? p.expiresAt : null;
                         const isActive = selectedProfile === name;
+                        
+                        let expiryText = '';
+                        if (expiresAt) {
+                            const daysLeft = Math.ceil((expiresAt - Date.now()) / (1000 * 60 * 60 * 24));
+                            if (isExpired) expiryText = 'Sessão Vencida ❌';
+                            else expiryText = `Expira em ${daysLeft} dia(s) ⏳`;
+                        } else if (isExpired) {
+                            expiryText = 'Sessão Vencida ❌';
+                        }
+
                         return (
                             <div key={name}
-                                className="flex items-center gap-3 px-4 py-3 transition-all"
-                                style={{ background: isActive ? 'rgba(23,191,96,0.06)' : 'transparent' }}>
+                                className={`flex items-center gap-3 px-4 py-3 transition-all ${isExpired && !isActive ? 'opacity-60' : ''}`}
+                                style={{ background: isActive ? (isExpired ? 'rgba(248,113,113,0.15)' : 'rgba(23,191,96,0.06)') : 'transparent' }}>
                                 {/* Avatar placeholder or Image */}
                                 {p.profile_pic ? (
-                                    <img src={p.profile_pic} className="w-8 h-8 rounded-full shrink-0 object-cover border border-white/10" alt="Profile" />
+                                    <img src={p.profile_pic} className={`w-8 h-8 rounded-full shrink-0 object-cover border ${isExpired ? 'border-red-500/50 grayscale' : 'border-white/10'}`} alt="Profile" />
                                 ) : (
                                     <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-                                        style={{ background: isActive ? 'rgba(23,191,96,0.2)' : 'rgba(100,116,139,0.15)', color: isActive ? '#17BF60' : '#64748b' }}>
+                                        style={{ background: isActive ? (isExpired ? 'rgba(248,113,113,0.2)' : 'rgba(23,191,96,0.2)') : 'rgba(100,116,139,0.15)', color: isActive ? (isExpired ? '#f87171' : '#17BF60') : '#64748b' }}>
                                         {name[0].toUpperCase()}
                                     </div>
                                 )}
@@ -221,21 +240,28 @@ const ConfigForm = ({ onStart, isRunning }) => {
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                        <span className="text-sm font-semibold text-white truncate">
+                                        <span className={`text-sm font-semibold truncate ${isExpired ? 'text-red-400' : 'text-white'}`}>
                                             {p.username ? `@${p.username}` : name}
                                         </span>
                                         {isActive && (
                                             <span className="text-xs px-1.5 py-0.5 rounded-full shrink-0 font-medium"
-                                                style={{ background: 'rgba(23,191,96,0.15)', color: '#17BF60' }}>
-                                                ativo
+                                                style={{ background: isExpired ? 'rgba(248,113,113,0.15)' : 'rgba(23,191,96,0.15)', color: isExpired ? '#f87171' : '#17BF60' }}>
+                                                {isExpired ? 'ativo (bloqueado)' : 'ativo'}
                                             </span>
                                         )}
                                     </div>
-                                    {updatedAt && (
-                                        <p className="text-xs mt-0.5" style={{ color: '#475569' }}>
-                                            Último login: {new Date(updatedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                        </p>
-                                    )}
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                        {updatedAt && (
+                                            <p className="text-xs" style={{ color: '#475569' }}>
+                                                Último login: {new Date(updatedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                            </p>
+                                        )}
+                                        {expiryText && (
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm ${isExpired ? 'bg-red-500/10 text-red-400' : 'bg-slate-800 text-slate-400'}`}>
+                                                {expiryText}
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
 
                                 {/* Actions */}
