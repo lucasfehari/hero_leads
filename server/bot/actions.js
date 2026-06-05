@@ -52,15 +52,34 @@ const likePost = async (page) => {
 
 const commentPost = async (page, message) => {
     try {
+        // Try clicking the comment icon SVG first (opens comment box if closed)
         const commentIcon = await page.$('svg[aria-label="Comment"], svg[aria-label="Comentar"]');
         if (commentIcon) {
             const clickable = await commentIcon.evaluateHandle(el => el.closest('button') || el.closest('div[role="button"]'));
-            if (clickable) await clickable.click();
+            if (clickable && clickable.asElement()) await clickable.click();
             await randomDelay(1000, 2000);
         }
-        const textarea = await page.$('textarea[aria-label="Add a comment…"], textarea[aria-label="Adicione um comentário..."], textarea');
-        if (textarea) {
-            await textarea.click();
+
+        // Instagram (2024+) uses a contenteditable div instead of textarea
+        // Try all known selectors in order
+        const COMMENT_SELECTORS = [
+            'textarea[aria-label="Add a comment…"]',
+            'textarea[aria-label="Adicione um comentário..."]',
+            'div[aria-label="Add a comment…"][contenteditable]',
+            'div[aria-label="Adicione um comentário..."][contenteditable]',
+            'div[aria-label="Comment"][contenteditable]',
+            'textarea',
+            'div[contenteditable="true"]',
+        ];
+
+        let commentField = null;
+        for (const sel of COMMENT_SELECTORS) {
+            commentField = await page.$(sel);
+            if (commentField) { console.log(`[COMMENT] Field found via: ${sel}`); break; }
+        }
+
+        if (commentField) {
+            await commentField.click();
             await randomDelay(500, 1500);
             await humanType(page, message);
             await randomDelay(1000, 2000);
@@ -68,6 +87,7 @@ const commentPost = async (page, message) => {
             await randomDelay(2000, 4000);
             return true;
         }
+        console.log('[COMMENT] Comment field not found.');
     } catch (e) { console.error('Error commenting:', e); }
     return false;
 };
@@ -643,66 +663,148 @@ const waitChatLoaded = async (page, timeout = 20000) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SEND DM — main entry point
+// OPEN DM VIA INBOX SEARCH — Estratégia definitiva
+// Navega diretamente para /direct/inbox/, usa o campo de busca da barra lateral
+// para pesquisar o username, valida o resultado e abre o chat.
+//
+// Fluxo baseado no DOM real do Instagram:
+//   1. Abre /direct/inbox/
+//   2. Preenche input[name="searchInput"] com o username
+//   3. Aguarda resultados (servidor + render)
+//   4. Clica no resultado SOMENTE se o username bater
+//   5. Chat abre — segue para o envio da mensagem
+// ─────────────────────────────────────────────────────────────────────────────
+const openDMViaInboxSearch = async (page, username) => {
+    try {
+        console.log(`[DM] Abrindo inbox global para buscar @${username}...`);
+
+        // 1. Navegar para o inbox geral
+        if (!page.url().includes('/direct/')) {
+            await page.goto('https://www.instagram.com/direct/inbox/', { waitUntil: 'networkidle2' });
+            await randomDelay(2500, 4000); // Esperar o inbox carregar completamente
+        }
+
+        // 2. Encontrar o campo de busca da barra lateral
+        const searchInput = await page.waitForSelector(
+            'input[name="searchInput"], input[placeholder="Pesquisa"], input[placeholder="Search"]',
+            { timeout: 8000 }
+        ).catch(() => null);
+
+        if (!searchInput) {
+            console.log('[DM] ❌ Campo de busca do inbox não encontrado.');
+            return false;
+        }
+
+        // Limpar campo antes de digitar
+        await searchInput.click({ clickCount: 3 });
+        await randomDelay(300, 600);
+        await searchInput.type(username, { delay: 80 + Math.random() * 60 });
+        console.log(`[DM] Pesquisando por: ${username}`);
+
+        // 3. Aguardar resultados carregarem (simular leitura humana + latência do servidor)
+        await randomDelay(2000, 3500);
+
+        // 4. Encontrar o resultado correto que corresponde EXATAMENTE ao username
+        // O resultado é um div[role="button"] contendo spans com o username
+        const clicked = await page.evaluate((uname) => {
+            const lowerTarget = uname.toLowerCase();
+
+            // Tenta encontrar o resultado que contém exatamente o username como texto
+            const allButtons = Array.from(document.querySelectorAll('div[role="button"], a[role="link"]'));
+
+            for (const btn of allButtons) {
+                // Procura spans dentro do botão que contenham o username
+                const spans = Array.from(btn.querySelectorAll('span'));
+                const usernameMatch = spans.some(span => {
+                    const txt = (span.textContent || '').trim().toLowerCase();
+                    return txt === lowerTarget;
+                });
+
+                if (usernameMatch) {
+                    btn.click();
+                    return true;
+                }
+            }
+
+            // Fallback: pega o primeiro resultado visível (mais relevante da busca)
+            const firstResult = document.querySelector(
+                '[role="listitem"] div[role="button"], [role="list"] > div[role="button"]'
+            );
+            if (firstResult) {
+                firstResult.click();
+                return 'fallback';
+            }
+
+            return false;
+        }, username);
+
+        if (!clicked) {
+            console.log(`[DM] ❌ Nenhum resultado encontrado para @${username}.`);
+            return false;
+        }
+
+        if (clicked === 'fallback') {
+            console.log(`[DM] ⚠️ Clicou no primeiro resultado (fallback) para @${username}.`);
+        } else {
+            console.log(`[DM] ✅ Resultado exato para @${username} encontrado e clicado.`);
+        }
+
+        // 5. Aguardar o chat abrir (simula tempo de carregamento do servidor)
+        await randomDelay(2000, 3500);
+
+        // 6. Verificar se o campo de mensagem apareceu
+        const inputVisible = await page.waitForSelector(
+            'div[contenteditable="true"], textarea, div[role="textbox"]',
+            { timeout: 8000 }
+        ).catch(() => null);
+
+        if (inputVisible) {
+            console.log(`[DM] ✅ Chat com @${username} aberto com sucesso!`);
+            return true;
+        }
+
+        console.log('[DM] ❌ Campo de mensagem não apareceu após clicar no resultado.');
+        return false;
+
+    } catch (e) {
+        console.error('[DM] Erro na estratégia InboxSearch:', e.message);
+        return false;
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEND DM — Ponto de entrada principal
 // ─────────────────────────────────────────────────────────────────────────────
 const sendDM = async (page, username, message, audios = []) => {
     try {
-        // ── Detect if we are already inside the DM chat for this user ──────────
-        // This happens when sendDM is called multiple times for the same person
-        // (e.g. text message first, then @audio). In that case we skip opening
-        // the chat and go straight to sending.
         const currentUrl = page.url();
-        const alreadyInChat = currentUrl.includes('/direct/') ||
-            !!(await page.$('div[contenteditable="true"], textarea, div[role="textbox"]'));
 
-        if (!alreadyInChat) {
-            // 1. Find Message Button on profile
-            const msgBtn = await page.evaluateHandle((texts) => {
-                const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
-                return buttons.find(b => {
-                    const text = b.textContent.toLowerCase().trim();
-                    return texts.some(t => text === t || text.includes(t));
-                });
-            }, TEXTS.MESSAGE);
+        // Se já estiver numa thread específica com esta pessoa, pular abertura
+        const alreadyInThread = currentUrl.includes('/direct/t/');
 
-            if (!msgBtn || !msgBtn.asElement()) {
-                console.log('[DM] Message button not found on profile.');
-                return false;
-            }
-
-            // 2. Click Message button
-            await humanMove(page);
-            const navPromise = page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => { });
-            await msgBtn.click();
-            await navPromise;
-
-            // 3. Wait for chat input (dismiss popups)
-            let chatOpen = false;
-            for (let i = 0; i < 20; i++) {
-                const notNowBtn = await page.evaluateHandle((texts) => {
-                    const buttons = Array.from(document.querySelectorAll('button'));
-                    return buttons.find(b => texts.some(t => (b.innerText || '').toLowerCase().includes(t)));
-                }, TEXTS.NOT_NOW);
-                if (notNowBtn && notNowBtn.asElement()) {
-                    await notNowBtn.click();
-                    await randomDelay(1000, 2000);
-                }
-
-                const input = await page.$('div[contenteditable="true"], textarea, div[role="textbox"]');
-                if (input) { chatOpen = true; break; }
-                await randomDelay(500, 500);
-            }
-
-            if (!chatOpen) {
-                console.log('[DM] Chat window did not open.');
+        if (!alreadyInThread) {
+            console.log(`[DM] Iniciando abertura do chat para @${username}...`);
+            const opened = await openDMViaInboxSearch(page, username);
+            if (!opened) {
+                console.log(`[DM] ❌ Não foi possível abrir o chat com @${username}.`);
                 return false;
             }
         } else {
-            console.log(`[DM] Already inside chat (${currentUrl.includes('/direct/') ? 'URL' : 'input detected'}) — skipping open step.`);
-            await randomDelay(500, 800); // Small stabilization pause
+            console.log(`[DM] Já está na thread do chat — pulando abertura.`);
+            await randomDelay(500, 1000);
         }
 
-        // 4. Audio message
+        // ── Dispensar popups (notificações, cookies, etc.) ──────────────────
+        const notNowBtn = await page.evaluateHandle((texts) => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            return buttons.find(b => texts.some(t => (b.innerText || '').toLowerCase().includes(t)));
+        }, TEXTS.NOT_NOW);
+        if (notNowBtn && notNowBtn.asElement()) {
+            await notNowBtn.click();
+            await randomDelay(1000, 1500);
+        }
+
+        // ── 4. Áudio ────────────────────────────────────────────────────────
         const isAudio = message.trim().startsWith('@audio');
         const audioConfig = isAudio && audios ? audios.find(a => a.id === message.trim()) : null;
 
@@ -712,73 +814,102 @@ const sendDM = async (page, username, message, audios = []) => {
                 return false;
             }
             console.log(`[DM] Chat opened. Identified audio command for file: ${audioConfig.path}.`);
-
-            // CRÍTICO: aguardar Loading... sumir antes de qualquer ação no chat
             await waitChatLoaded(page);
 
-            console.log('[DM] Clicking input field once to ensure chat bar is focused (without typing) to make mic visible...');
             const chatInputForFocus = await page.$('div[contenteditable="true"], textarea, div[role="textbox"]');
             if (chatInputForFocus) {
                 await chatInputForFocus.click();
                 await randomDelay(500, 800);
-                console.log('[DM] Input field clicked.');
-            } else {
-                console.log('[DM] Warning: Input field not found for click focus.');
             }
 
-            console.log('[DM] Clicando no botão Expandir para revelar o microfone...');
             await clickExpandButton(page);
-            await randomDelay(800, 1200); // dar tempo ao DOM renderizar botões pós-expand
+            await randomDelay(800, 1200);
 
-            console.log('[DM] Proceeding to sendAudioHelper...');
             const audioSent = await sendAudioHelper(page, audioConfig.path);
-
             if (audioSent) {
-                console.log('[DM] Audio sent successfully. Waiting extra time for upload to finish...');
-                await randomDelay(8000, 12000); // CRITICAL: Wait for upload before closing/moving on
+                await randomDelay(8000, 12000);
             }
-
             return audioSent;
         }
 
-        // 5. Text message
-        const INPUT_SEL = 'div[contenteditable="true"], textarea, div[role="textbox"]';
-        const input = await page.$(INPUT_SEL);
+        // ── 5. Mensagem de texto ─────────────────────────────────────────────
+        // BUG FIX: Aguardar o chat carregar ANTES de buscar o campo de input.
+        // Sem isso, o seletor genérico pode acertar o campo de busca do inbox
+        // que ainda está visível enquanto o chat carrega em paralelo.
+        await waitChatLoaded(page);
+
+        // BUG FIX: Seletor específico do campo de mensagem do chat.
+        // Prioriza o campo dentro da área de chat (não o de busca na sidebar).
+        // O Instagram coloca o input de mensagem dentro de um section[role] ou
+        // dentro de um div com aria-label relacionado a mensagem.
+        const CHAT_INPUT_SELECTORS = [
+            // Seletor mais específico: contenteditable dentro da área principal de chat
+            'div[role="main"] div[contenteditable="true"]',
+            'section div[contenteditable="true"]',
+            // aria-label específicos do campo de mensagem
+            'div[aria-label="Message"][contenteditable="true"]',
+            'div[aria-label="Mensagem"][contenteditable="true"]',
+            'div[aria-label="Mensaje"][contenteditable="true"]',
+            'div[aria-placeholder][contenteditable="true"]',
+            // Fallback genérico (por último)
+            'div[contenteditable="true"]',
+            'textarea',
+        ];
+
+        let input = null;
+        for (const sel of CHAT_INPUT_SELECTORS) {
+            const el = await page.$(sel);
+            if (!el) continue;
+            // Verificar que está visível e não é o campo de busca do inbox
+            const isValid = await page.evaluate(el => {
+                const rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return false;
+                // Rejeitar se for filho do input de busca lateral
+                const sidebar = el.closest('[aria-label="Chats"], [aria-label="Direct"]');
+                if (sidebar && el.tagName !== 'TEXTAREA') return false;
+                return true;
+            }, el);
+            if (isValid) {
+                input = el;
+                console.log(`[DM] Campo de texto encontrado via: ${sel}`);
+                break;
+            }
+        }
 
         if (input) {
-            // Bring the element into view and focus it so execCommand targets it
-            await input.evaluate(el => { el.scrollIntoView(); el.focus(); });
-            await page.focus(INPUT_SEL);           // Puppeteer-level focus
-            await new Promise(r => setTimeout(r, 400));
+            // BUG FIX: Foco único e direto — sem chamar evaluate+focus E page.focus E click
+            // em sequência, o que causa 3 eventos separados no React e reseta o estado.
+            // Uma única chamada click() do Puppeteer é suficiente e mais confiável.
+            await input.scrollIntoView();
+            await randomDelay(200, 400);
+            await input.click();
+            await randomDelay(400, 700);
 
             await humanType(page, message);
-            await new Promise(r => setTimeout(r, 1000));
+            await randomDelay(800, 1200);
 
-            // Try to click the explicit Send button first (safer than Enter for React)
-            const SEND_LABELS = ['send message', 'send', 'enviar mensagem', 'enviar'];
-            const sentViaBtn = await page.evaluate((labels) => {
-                for (const el of Array.from(document.querySelectorAll('[aria-label], button, div[role="button"]'))) {
-                    const lbl = (el.getAttribute('aria-label') || el.textContent || '').toLowerCase().trim();
-                    if (labels.some(s => lbl === s || lbl.includes(s))) {
-                        const btn = el.closest('button') || el.closest('div[role="button"]') || el;
-                        btn.click();
-                        return true;
-                    }
-                }
-                return false;
-            }, SEND_LABELS);
-
-            if (!sentViaBtn) {
-                // Fallback: Enter key
+            // BUG FIX: Busca do botão Enviar com correspondência EXATA de aria-label.
+            // Antes usava lbl.includes(s) que acertava botões de chamada, share,
+            // 'send request', etc. Agora usa findSendButton com as mesmas estratégias
+            // robustas usadas pelo sistema de áudio.
+            const sendBtn = await findSendButton(page);
+            if (sendBtn && sendBtn.asElement()) {
+                await sendBtn.evaluate(el => el.scrollIntoView({ block: 'center' }));
+                await randomDelay(200, 400);
+                await sendBtn.click();
+                console.log('[DM] ✅ Mensagem enviada via botão Enviar (findSendButton).');
+            } else {
+                // Fallback: Enter (funciona na maioria dos casos quando o campo está focado)
+                console.log('[DM] Botão Enviar não encontrado — usando Enter como fallback.');
                 await page.keyboard.press('Enter');
             }
 
-            await new Promise(r => setTimeout(r, 2500));
-            console.log('[DM] ✅ Text message sent.');
+            await randomDelay(2000, 3000);
+            console.log('[DM] ✅ Mensagem de texto enviada.');
             return true;
         }
 
-        console.log('[DM] Chat input not found after chat opened.');
+        console.log('[DM] ❌ Campo de texto não encontrado após abrir o chat.');
         return false;
 
     } catch (e) {
@@ -786,5 +917,6 @@ const sendDM = async (page, username, message, audios = []) => {
         return false;
     }
 };
+
 
 module.exports = { likePost, commentPost, followUser, sendDM, clickExpandButton };

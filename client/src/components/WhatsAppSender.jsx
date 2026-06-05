@@ -44,7 +44,7 @@ const NumInput = ({ label, value, onChange, unit, min = 1 }) => (
 
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
-const WhatsAppSender = ({ prefillNumbers }) => {
+const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
     // Session
     const [sessions, setSessions] = useState([]);
     const [currentSession, setCurrentSession] = useState('default');
@@ -80,6 +80,15 @@ const WhatsAppSender = ({ prefillNumbers }) => {
     const [queueStatus, setQueueStatus] = useState({ status: 'idle', queueLength: 0 });
     const [emojiInput, setEmojiInput] = useState('');
     const [optOuts, setOptOuts] = useState([]); // alertas de opt-out em tempo real
+
+    // ── I.A Personalização ───────────────────────────────────────────────────
+    const [aiEnabled, setAiEnabled] = useState(false);
+    const [aiPrompt, setAiPrompt] = useState('Olá {nome}! Vi que sua empresa {empresa} em {endereco} atua no segmento de {segmento}. Gostaria de apresentar uma solução que pode te ajudar a crescer ainda mais. Posso te enviar mais detalhes?');
+    const [aiContacts, setAiContacts] = useState([]); // [{name, phone, message, enabled, loading, lead}]
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [aiSectionOpen, setAiSectionOpen] = useState(false);
+    const [aiProgress, setAiProgress] = useState({ done: 0, total: 0 }); // progress tracker
+    const [splitAiMessage, setSplitAiMessage] = useState(true); // Toggle para enviar parágrafos como mensagens separadas
 
     // Opt-Out config
     const [optOutConfig, setOptOutConfig] = useState({
@@ -168,6 +177,27 @@ const WhatsAppSender = ({ prefillNumbers }) => {
         };
     }, [loadSessions, loadWarmup, loadOptOutConfig, prefillNumbers]);
 
+    // Quando chegam leads do Maps, montar tabela de contatos para I.A
+    useEffect(() => {
+        if (prefillLeads && prefillLeads.length > 0) {
+            const contacts = prefillLeads.map(lead => ({
+                id: lead.id || Math.random().toString(36).slice(2),
+                name: lead.name || lead.title || '—',
+                phone: lead.phoneFormatted || lead.phone || '',
+                address: lead.address || '',
+                segmento: lead.query || lead.category || '',
+                website: lead.website || '',
+                message: '',
+                enabled: true,
+                loading: false,
+                lead,
+            }));
+            setAiContacts(contacts);
+            setAiEnabled(true);
+            setAiSectionOpen(true);
+        }
+    }, [prefillLeads]);
+
     const statusToEntry = (d) => {
         const ts = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         if (d.status === 'sent') return { ts, color: 'text-emerald-400', text: `✓ Enviado → ${d.number} (msg ${d.msgIndex}/${d.msgTotal})` };
@@ -216,8 +246,97 @@ const WhatsAppSender = ({ prefillNumbers }) => {
         } catch (e) { alert('Erro: ' + e.message); }
     };
 
+    // ── Gerar mensagens I.A em batches paralelos com progress ──────────────────
+    const handleGenerateAI = async () => {
+        if (!aiPrompt.trim()) return alert('Digite um prompt para a I.A!');
+        const key = localStorage.getItem('openRouterKey') || '';
+        if (!key) return alert('Configure a chave OpenRouter em Global Settings primeiro!');
+        const model = localStorage.getItem('openRouterModel') || 'openai/gpt-4o-mini';
+        const companyContext = localStorage.getItem('companyContext') || '';
+
+        const total = aiContacts.length;
+        setIsGenerating(true);
+        setAiProgress({ done: 0, total });
+        // Marcar todos como loading
+        setAiContacts(prev => prev.map(c => ({ ...c, loading: true, message: '' })));
+
+        const leadsToSend = aiContacts.map(c => ({
+            ...(c.lead || {}),
+            id: c.id,
+            name: c.name,
+            phoneFormatted: c.phone,
+            phone: c.phone,
+            address: c.address,
+            query: c.segmento,
+            website: c.website,
+        }));
+
+        const CHUNK = 8;
+        try {
+            for (let i = 0; i < leadsToSend.length; i += CHUNK) {
+                const chunk = leadsToSend.slice(i, i + CHUNK);
+                const res = await fetch('http://localhost:3000/api/ai/generate-messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leads: chunk, prompt: aiPrompt, companyContext, key, model })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                // Aplicar mensagens geradas para este chunk
+                const startIdx = i;
+                setAiContacts(prev => {
+                    const updated = [...prev];
+                    data.results.forEach((result, ri) => {
+                        const idx = startIdx + ri;
+                        if (updated[idx]) {
+                            updated[idx] = { ...updated[idx], message: result.message || '', loading: false };
+                        }
+                    });
+                    return updated;
+                });
+                setAiProgress({ done: Math.min(i + CHUNK, total), total });
+            }
+        } catch (e) {
+            alert('Erro ao gerar mensagens: ' + e.message);
+            setAiContacts(prev => prev.map(c => ({ ...c, loading: false })));
+        }
+        setIsGenerating(false);
+        setAiProgress({ done: total, total });
+    };
+
+
     // ── Iniciar campanha ──────────────────────────────────────────────────────
     const handleStart = async () => {
+        // Modo I.A com tabela de contatos
+        if (aiEnabled && aiContacts.length > 0) {
+            const enabledContacts = aiContacts.filter(c => c.enabled && c.phone && c.message.trim());
+            if (enabledContacts.length === 0) return alert('Nenhum contato habilitado com mensagem gerada. Gere as mensagens com I.A primeiro!');
+
+            setStatusHistory([]);
+            // Enviar um por um com mensagem individual
+            for (const contact of enabledContacts) {
+                try {
+                    let finalMessages = [contact.message];
+                    if (splitAiMessage) {
+                        // Divide pelo separador inteligente da I.A (|||)
+                        finalMessages = contact.message.split('|||').map(m => m.trim()).filter(m => m.length > 0);
+                    }
+
+                    await fetch(`${API}/start`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            numbers: [contact.phone],
+                            messages: finalMessages,
+                            config
+                        })
+                    });
+                } catch (e) { console.error('Erro ao enfileirar:', e); }
+            }
+            return;
+        }
+
+        // Modo Manual
         const numberList = numbers.split(/[\n,]+/).map(n => n.trim()).filter(Boolean);
         
         const validMessages = [];
@@ -271,8 +390,238 @@ const WhatsAppSender = ({ prefillNumbers }) => {
     return (
         <div className="space-y-5">
 
+            {/* ══ I.A PERSONALIZAÇÃO — sempre visível ══════════════════════════ */}
+            <div className="rounded-2xl border overflow-hidden transition-all duration-300"
+                style={{
+                    borderColor: aiEnabled ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.05)',
+                    background: aiEnabled ? 'rgba(99,102,241,0.06)' : 'rgba(255,255,255,0.01)'
+                }}>
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 cursor-pointer" onClick={() => setAiSectionOpen(o => !o)}>
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+                            style={{ background: aiEnabled ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)' }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4" style={{ color: aiEnabled ? '#818cf8' : '#64748b' }}>
+                                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 0 2h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1 0-2h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+                                <circle cx="8.5" cy="13.5" r="1.5" fill="currentColor" stroke="none" />
+                                <circle cx="15.5" cy="13.5" r="1.5" fill="currentColor" stroke="none" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p className="font-bold text-sm" style={{ color: aiEnabled ? '#a5b4fc' : '#94a3b8' }}>
+                                I.A Personalização
+                                {aiContacts.length > 0 && (
+                                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full font-normal"
+                                        style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8' }}>
+                                        {aiContacts.filter(c => c.enabled).length}/{aiContacts.length} contatos
+                                    </span>
+                                )}
+                            </p>
+                            <p className="text-xs text-slate-600 mt-0.5">
+                                {aiEnabled ? 'I.A gera mensagem única para cada lead' : 'Desativado — usando mensagem manual'}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {/* Toggle global de I.A */}
+                        <button
+                            onClick={e => { e.stopPropagation(); setAiEnabled(v => !v); }}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border"
+                            style={aiEnabled
+                                ? { background: 'rgba(99,102,241,0.2)', borderColor: 'rgba(99,102,241,0.4)', color: '#a5b4fc' }
+                                : { background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.08)', color: '#475569' }
+                            }
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                {aiEnabled
+                                    ? <><rect x="1" y="5" width="22" height="14" rx="7" fill="rgba(99,102,241,0.6)" stroke="none" /><circle cx="16" cy="12" r="5" fill="white" stroke="none" /></>
+                                    : <><rect x="1" y="5" width="22" height="14" rx="7" fill="rgba(255,255,255,0.08)" stroke="none" /><circle cx="8" cy="12" r="5" fill="#475569" stroke="none" /></>
+                                }
+                            </svg>
+                            {aiEnabled ? 'I.A ON' : 'I.A OFF'}
+                        </button>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-slate-600 transition-transform duration-200" style={{ transform: aiSectionOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                            <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                    </div>
+                </div>
+
+                {/* Body expandível */}
+                {aiSectionOpen && (
+                    <div className="px-4 pb-5 border-t border-white/5 pt-4 space-y-4">
+
+                        {/* Prompt */}
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <label className="text-xs font-semibold text-slate-400">Prompt da I.A</label>
+                                <span className="text-xs text-slate-600">Variáveis disponíveis:</span>
+                            </div>
+                            {/* Badges de variáveis */}
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                {['{nome}', '{empresa}', '{endereco}', '{segmento}', '{site}', '{telefone}', '{rating}', '{email}', '{instagram}'].map(v => (
+                                    <button key={v}
+                                        onClick={() => setAiPrompt(p => p + ' ' + v)}
+                                        className="text-xs px-2 py-0.5 rounded-md font-mono transition-all hover:opacity-80"
+                                        style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.25)' }}>
+                                        {v}
+                                    </button>
+                                ))}
+                            </div>
+                            <textarea
+                                value={aiPrompt}
+                                onChange={e => setAiPrompt(e.target.value)}
+                                placeholder="Ex: Olá {nome}! Vi que {empresa} fica em {endereco}. Tenho uma solução incrível para o segmento de {segmento}..."
+                                className="w-full rounded-xl p-3 text-sm resize-none h-24 outline-none transition-all"
+                                style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(99,102,241,0.2)', color: '#e2e8f0' }}
+                            />
+                            
+                            {/* Toggle para quebra de parágrafos */}
+                            <div className="mt-3 flex items-center justify-between p-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                <div>
+                                    <h4 className="text-sm font-medium text-slate-300">I.A Inteligente (Multi-mensagens)</h4>
+                                    <p className="text-xs text-slate-500 mt-0.5">Permite que a I.A decida quando enviar textos separados para parecer mais humano (ex: Oi fulano! [envia] Vi sua empresa... [envia]).</p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" className="sr-only peer" checked={splitAiMessage} onChange={(e) => setSplitAiMessage(e.target.checked)} />
+                                    <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                                </label>
+                            </div>
+                        </div>
+
+                        {/* Botão gerar */}
+                        <button
+                            onClick={handleGenerateAI}
+                            disabled={isGenerating || aiContacts.length === 0}
+                            className="w-full py-3 rounded-xl text-sm font-bold flex flex-col items-center justify-center gap-1 transition-all disabled:opacity-40 overflow-hidden"
+                            style={{
+                                background: isGenerating ? 'rgba(99,102,241,0.12)' : 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                                color: 'white',
+                                boxShadow: isGenerating ? 'none' : '0 4px 20px rgba(99,102,241,0.3)'
+                            }}>
+                            {isGenerating ? (
+                                <>
+                                    <div className="flex items-center gap-2">
+                                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.3" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
+                                        <span>Gerando... {aiProgress.done}/{aiProgress.total}</span>
+                                    </div>
+                                    {/* Barra de progresso */}
+                                    <div className="w-full h-1 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.1)' }}>
+                                        <div className="h-1 rounded-full transition-all duration-500" style={{
+                                            width: aiProgress.total > 0 ? `${(aiProgress.done / aiProgress.total) * 100}%` : '0%',
+                                            background: 'rgba(255,255,255,0.6)'
+                                        }} />
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="rgba(255,255,255,0.3)" /></svg>
+                                    ✨ Gerar Mensagens com I.A ({aiContacts.filter(c => c.enabled).length} ativos / {aiContacts.length} total)
+                                </div>
+                            )}
+                        </button>
+
+                        {aiContacts.length === 0 && (
+                            <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.08)' }}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 text-slate-600 flex-shrink-0"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                                <p className="text-xs text-slate-600">Clique em <span className="text-slate-400 font-medium">Abrir no WhatsApp</span> na aba Maps para carregar leads aqui.</p>
+                            </div>
+                        )}
+
+                        {/* ── TABELA DE CONTATOS ──────────────────────────────── */}
+                        {aiContacts.length > 0 && (
+                            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                                {/* Header da tabela */}
+                                <div className="grid gap-2 px-3 py-2 text-xs font-bold text-slate-500 uppercase tracking-wider"
+                                    style={{ gridTemplateColumns: '1fr 120px 1fr 40px', background: 'rgba(0,0,0,0.3)' }}>
+                                    <span>Nome / Empresa</span>
+                                    <span>Telefone</span>
+                                    <span>Mensagem I.A</span>
+                                    <span className="text-center">✓</span>
+                                </div>
+                                {/* Rows */}
+                                <div className="divide-y" style={{ divideColor: 'rgba(255,255,255,0.04)', maxHeight: '360px', overflowY: 'auto' }}>
+                                    {aiContacts.map((contact, idx) => (
+                                        <div key={contact.id}
+                                            className="grid gap-2 px-3 py-2.5 transition-all"
+                                            style={{
+                                                gridTemplateColumns: '1fr 120px 1fr 40px',
+                                                background: contact.enabled ? 'transparent' : 'rgba(0,0,0,0.2)',
+                                                opacity: contact.enabled ? 1 : 0.45
+                                            }}>
+                                            {/* Nome */}
+                                            <div className="flex flex-col justify-center min-w-0">
+                                                <p className="text-xs font-semibold text-slate-200 truncate">{contact.name}</p>
+                                                {contact.address && <p className="text-[10px] text-slate-600 truncate">{contact.address}</p>}
+                                                {contact.segmento && <p className="text-[10px] text-indigo-400/60 truncate">{contact.segmento}</p>}
+                                            </div>
+                                            {/* Telefone */}
+                                            <div className="flex items-center">
+                                                <span className="text-xs font-mono text-emerald-400 truncate">{contact.phone}</span>
+                                            </div>
+                                            {/* Mensagem editável */}
+                                            <div className="relative">
+                                                {contact.loading ? (
+                                                    <div className="flex items-center gap-2 h-full">
+                                                        <svg className="w-3 h-3 animate-spin text-indigo-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.3" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
+                                                        <span className="text-xs text-slate-600 italic">Gerando...</span>
+                                                    </div>
+                                                ) : (
+                                                    <textarea
+                                                        value={contact.message}
+                                                        onChange={e => setAiContacts(prev => prev.map((c, i) => i === idx ? { ...c, message: e.target.value } : c))}
+                                                        placeholder="Mensagem será gerada pela I.A..."
+                                                        className="w-full text-xs resize-none rounded-lg p-2 outline-none transition-all custom-scrollbar"
+                                                        style={{
+                                                            background: 'rgba(0,0,0,0.25)',
+                                                            border: contact.message ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(255,255,255,0.06)',
+                                                            color: '#cbd5e1',
+                                                            height: '64px',
+                                                            lineHeight: '1.4'
+                                                        }}
+                                                    />
+                                                )}
+                                            </div>
+                                            {/* Toggle individual */}
+                                            <div className="flex items-center justify-center">
+                                                <button
+                                                    onClick={() => setAiContacts(prev => prev.map((c, i) => i === idx ? { ...c, enabled: !c.enabled } : c))}
+                                                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                                                    style={contact.enabled
+                                                        ? { background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#4ade80' }
+                                                        : { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#475569' }
+                                                    }
+                                                    title={contact.enabled ? 'Clique para excluir do disparo' : 'Clique para incluir no disparo'}
+                                                >
+                                                    {contact.enabled
+                                                        ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3.5 h-3.5"><polyline points="20 6 9 17 4 12" /></svg>
+                                                        : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3.5 h-3.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                                    }
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {/* Footer da tabela */}
+                                <div className="flex items-center justify-between px-3 py-2 text-xs" style={{ background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <span className="text-slate-600">
+                                        {aiContacts.filter(c => c.enabled && c.message).length} prontos para envio
+                                        · {aiContacts.filter(c => !c.enabled).length} desativados
+                                    </span>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setAiContacts(prev => prev.map(c => ({ ...c, enabled: true })))} className="text-indigo-400 hover:text-indigo-300 text-xs transition-colors">Ativar todos</button>
+                                        <span className="text-slate-700">·</span>
+                                        <button onClick={() => setAiContacts(prev => prev.map(c => ({ ...c, enabled: false })))} className="text-slate-500 hover:text-slate-400 text-xs transition-colors">Desativar todos</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
             {/* ── ALERTAS OPT-OUT ──────────────────────────────────────── */}
             {optOuts.length > 0 && (
+
                 <div className="space-y-2">
                     {optOuts.map(o => (
                         <div key={o.id} className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 animate-pulse-once">

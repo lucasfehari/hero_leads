@@ -21,10 +21,12 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:5173", // Allow frontend dev server
+        // Aceita qualquer porta local (localhost ou 127.0.0.1)
+        origin: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
         methods: ["GET", "POST"]
     }
 });
+
 
 app.use(cors());
 app.use(express.json());
@@ -272,7 +274,105 @@ app.post('/api/bot/test-ai', async (req, res) => {
     }
 });
 
+// Gerar mensagens personalizadas com I.A para cada lead do Maps (paralelo, sem limite)
+app.post('/api/ai/generate-messages', async (req, res) => {
+    const { leads, prompt, companyContext, key, model } = req.body;
+    if (!key) return res.status(400).json({ success: false, error: 'Chave OpenRouter não configurada. Vá em Global Settings.' });
+    if (!leads || !Array.isArray(leads) || leads.length === 0) return res.status(400).json({ success: false, error: 'Nenhum lead fornecido.' });
+    if (!prompt || !prompt.trim()) return res.status(400).json({ success: false, error: 'Prompt não fornecido.' });
+
+    const llmModel = model || 'openai/gpt-4o-mini';
+    const BATCH_SIZE = 8; // Processar 8 em paralelo
+
+    const systemPrompt = [
+        'Você é um consultor de vendas sênior especializado em prospecção B2B.',
+        companyContext ? `\nContexto da empresa que você representa:\n${companyContext}` : '',
+        '\nSua tarefa: analisar os dados de cada empresa prospectada e criar uma mensagem de abordagem no WhatsApp.',
+        '\nRegras importantes:',
+        '- A mensagem deve ser natural, como se um humano estivesse escrevendo',
+        '- Use os dados da empresa para personalizar ao máximo (mencione o nome, localização, segmento)',
+        '- Se a empresa tiver site, sugira que viu o site deles',
+        '- Se tiver avaliações, mencione a reputação positiva deles (se aplicável)',
+        '- Seja direto e objetivo — máximo 3-4 parágrafos curtos',
+        '- NÃO use emojis em excesso, no máximo 1-2 por mensagem',
+        '- Se você achar mais humano enviar o texto dividido em VÁRIAS mensagens separadas (como um humano enviaria no WhatsApp), use o separador "|||" entre elas. Exemplo: "Oi fulano! Tudo bem? ||| Vi que você tem uma empresa de..."',
+        '- Responda APENAS com a mensagem, sem aspas, sem prefixo, sem explicações extras',
+    ].join('');
+
+    // Gera a mensagem para um lead específico
+    const generateForLead = async (lead, idx) => {
+        const nome = lead.name || lead.title || 'prezado(a)';
+        const empresa = lead.name || lead.title || '';
+        const endereco = lead.address || '';
+        const telefone = lead.phoneFormatted || lead.phone || '';
+        const segmento = lead.query || lead.category || '';
+        const site = lead.website || '';
+        const email = lead.email || '';
+        const instagram = lead.instagram || '';
+        const rating = lead.rating ? `${lead.rating} estrelas` : '';
+        const reviews = lead.reviews_count || lead.reviewsCount || '';
+
+        // Montar contexto rico da empresa
+        const leadContext = [
+            `Empresa: ${empresa}`,
+            endereco ? `Localização: ${endereco}` : '',
+            segmento ? `Segmento / Busca: ${segmento}` : '',
+            site ? `Site: ${site}` : 'Não tem site próprio',
+            email ? `Email: ${email}` : '',
+            instagram ? `Instagram: @${instagram}` : '',
+            rating ? `Avaliação no Google: ${rating}${reviews ? ` (${reviews} avaliações)` : ''}` : '',
+        ].filter(Boolean).join('\n');
+
+        // Substituir variáveis no prompt do usuário
+        const userPrompt = prompt
+            .replace(/\{nome\}/gi, nome)
+            .replace(/\{empresa\}/gi, empresa)
+            .replace(/\{endereco\}/gi, endereco)
+            .replace(/\{telefone\}/gi, telefone)
+            .replace(/\{segmento\}/gi, segmento)
+            .replace(/\{site\}/gi, site)
+            .replace(/\{rating\}/gi, rating)
+            .replace(/\{email\}/gi, email)
+            .replace(/\{instagram\}/gi, instagram);
+
+        const finalUserPrompt = `${userPrompt}\n\n--- Dados da empresa para personalizar a mensagem ---\n${leadContext}`;
+
+        try {
+            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: llmModel,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: finalUserPrompt }
+                    ],
+                    max_tokens: 500,
+                    temperature: 0.72
+                })
+            });
+            const data = await response.json();
+            const message = data.choices?.[0]?.message?.content?.trim() || '';
+            return { leadId: lead.id, phone: telefone, name: nome, message, success: !!message, idx };
+        } catch (e) {
+            return { leadId: lead.id, phone: telefone, name: nome, message: '', success: false, error: e.message, idx };
+        }
+    };
+
+    // Processar em batches paralelos
+    const results = new Array(leads.length);
+    for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+        const batch = leads.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(batch.map((lead, batchIdx) => generateForLead(lead, i + batchIdx)));
+        batchResults.forEach(r => { results[r.idx] = r; });
+    }
+
+    res.json({ success: true, results, total: leads.length });
+});
+
+
 // Audio library — list all saved audios
+
 app.get('/api/bot/audios', (req, res) => {
     try {
         const files = fs.readdirSync(BOT_AUDIOS_DIR)

@@ -35,8 +35,10 @@ const GlobalSettingsModal = ({ isOpen, onClose, onSave }) => {
         localStorage.setItem('openRouterModel', settings.openRouterModel);
         localStorage.setItem('companyContext', settings.companyContext);
         setSaved(true);
-        if (onSave) onSave(settings);
-        setTimeout(() => setSaved(false), 2000);
+        // Notify parent and close after brief success feedback
+        setTimeout(() => {
+            if (onSave) onSave(settings);
+        }, 1200);
     };
 
     const testConnection = async () => {

@@ -196,10 +196,12 @@ class MessageQueue {
                             // Simulação de gravação de áudio
                             if (client) {
                                 const chat = await client.getChatById(targetId);
-                                await chat.sendStateRecording();
-                                // Tempo fixo/aleatório de gravação simulado para ser rápido mas verossímil
-                                const recordTime = this.config.antiBanEnabled ? gaussianDelay(2000, 6000) : 2500;
-                                await sleep(recordTime);
+                                if (chat) {
+                                    await chat.sendStateRecording();
+                                    // Tempo fixo/aleatório de gravação simulado para ser rápido mas verossímil
+                                    const recordTime = this.config.antiBanEnabled ? gaussianDelay(2000, 6000) : 2500;
+                                    await sleep(recordTime);
+                                }
                             }
                             
                             await activeClient.sendMessage(targetId, media, { sendAudioAsVoice: true });
@@ -221,15 +223,17 @@ class MessageQueue {
                         try {
                             if (client) {
                                 const chat = await client.getChatById(targetId);
-                                await chat.sendStateTyping();
-                                // Tempo de digitação proporcional ao tamanho (humano)
-                                const typingTime = this.config.antiBanEnabled
-                                    ? gaussianDelay(
-                                        Math.min(message.length * 50, 1000),
-                                        Math.min(message.length * 120, 6000)
-                                    )
-                                    : Math.min(message.length * 80, 4000);
-                                await sleep(typingTime);
+                                if (chat) {
+                                    await chat.sendStateTyping();
+                                    // Tempo de digitação proporcional ao tamanho (humano)
+                                    const typingTime = this.config.antiBanEnabled
+                                        ? gaussianDelay(
+                                            Math.min(message.length * 50, 1000),
+                                            Math.min(message.length * 120, 6000)
+                                        )
+                                        : Math.min(message.length * 80, 4000);
+                                    await sleep(typingTime);
+                                }
                             }
                         } catch (e) {
                             await sleep(1500);

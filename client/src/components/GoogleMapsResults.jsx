@@ -3,6 +3,23 @@ import { MapPin, Download, Phone, Globe, Map, Trash2, RefreshCw, Search, Star, D
 
 const PAGE_SIZE = 20;
 
+// Detecta se o número já tem DDI (11+ dígitos ou começa com código de país)
+const smartFormatPhone = (phone, countryCode) => {
+    if (!phone) return '';
+    let cleaned = phone.replace(/\D/g, '');
+    // Remove zero inicial (discagem local)
+    if (cleaned.startsWith('0') && cleaned.length > 9) cleaned = cleaned.substring(1);
+    // Se já tem DDI (11+ dígitos), não adicionar nada
+    if (cleaned.length >= 11 && !countryCode) return cleaned;
+    // Se DDI informado e número ainda não tem, adicionar
+    if (countryCode && cleaned.length < 12) {
+        if (!cleaned.startsWith(countryCode)) {
+            cleaned = countryCode + cleaned;
+        }
+    }
+    return cleaned;
+};
+
 const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) => {
     // ── DB State (leads persistidos) ──────────────────────────────────────────
     const [dbLeads, setDbLeads] = useState([]);
@@ -11,7 +28,7 @@ const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) =
     const [dbPage, setDbPage] = useState(1);
     const [filterQuery, setFilterQuery] = useState('');
     const [websiteFilter, setWebsiteFilter] = useState('all');
-    const [countryCode, setCountryCode] = useState('55');
+    const [countryCode, setCountryCode] = useState('');
     const [minStars, setMinStars] = useState('');
     const [minReviews, setMinReviews] = useState('');
     const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
@@ -77,25 +94,11 @@ const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) =
                 let filename = '';
                 let mimeType = '';
 
-                const formatPhone = (phone) => {
-                    if (!phone) return '';
-                    let cleaned = phone.replace(/\D/g, '');
-                    if (cleaned.startsWith('0')) {
-                        cleaned = cleaned.substring(1);
-                    }
-                    if (countryCode) {
-                        if (!(cleaned.startsWith(countryCode) && cleaned.length >= countryCode.length + 10)) {
-                            cleaned = countryCode + cleaned;
-                        }
-                    }
-                    return cleaned;
-                };
-
                 if (type === 'csv_full') {
                     const headers = ['ID', 'Nome', 'Telefone', 'Endereço', 'Website', 'Busca', 'Data'];
                     content = [
                         headers.join(','),
-                        ...leads.map(r => `"${r.id}","${r.name || ''}","${r.phone ? formatPhone(r.phone) : ''}","${r.address || ''}","${r.website || ''}","${r.query || ''}","${r.scraped_at || ''}"`)
+                        ...leads.map(r => `"${r.id}","${r.name || ''}","${r.phone ? smartFormatPhone(r.phone, countryCode) : ''}","${r.address || ''}","${r.website || ''}","${r.query || ''}","${r.scraped_at || ''}"`)
                     ].join('\n');
                     filename = `leads_maps_completo_${Date.now()}.csv`;
                     mimeType = 'text/csv;charset=utf-8;';
@@ -103,17 +106,16 @@ const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) =
                     const headers = ['Nome', 'Telefone', 'Website'];
                     content = [
                         headers.join(','),
-                        ...leads.map(r => `"${r.name || ''}","${r.phone ? formatPhone(r.phone) : ''}","${r.website || ''}"`)
+                        ...leads.map(r => `"${r.name || ''}","${r.phone ? smartFormatPhone(r.phone, countryCode) : ''}","${r.website || ''}"`)
                     ].join('\n');
                     filename = `leads_maps_lousa_${Date.now()}.csv`;
                     mimeType = 'text/csv;charset=utf-8;';
                 } else if (type === 'txt_numbers') {
-                    content = leads.filter(r => r.phone).map(r => {
-                        return formatPhone(r.phone);
-                    }).join('\n');
+                    content = leads.filter(r => r.phone).map(r => smartFormatPhone(r.phone, countryCode)).join('\n');
                     filename = `numeros_maps_${Date.now()}.txt`;
                     mimeType = 'text/plain;charset=utf-8;';
                 }
+
 
                 const blob = new Blob([content], { type: mimeType });
                 const url = URL.createObjectURL(blob);
@@ -149,26 +151,20 @@ const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) =
     const handleSendToCampaign = () => {
         if (dbLeads.length === 0) return alert('Sem leads para campanha.');
 
-        const formatPhone = (phone) => {
-            if (!phone) return '';
-            let cleaned = phone.replace(/\D/g, '');
-            if (cleaned.startsWith('0')) {
-                cleaned = cleaned.substring(1);
-            }
-            if (countryCode) {
-                if (!(cleaned.startsWith(countryCode) && cleaned.length >= countryCode.length + 10)) {
-                    cleaned = countryCode + cleaned;
-                }
-            }
-            return cleaned;
-        };
-
-        const validPhones = dbLeads.filter(l => l.whatsapp_valid !== 0 && l.phone).map(l => formatPhone(l.phone));
+        const validLeads = dbLeads.filter(l => l.whatsapp_valid !== 0 && l.phone);
+        const validPhones = validLeads.map(l => smartFormatPhone(l.phone, countryCode));
 
         if (validPhones.length === 0) return alert('Nenhum telefone encontrado nos filtros!');
 
-        onOpenWhatsApp(validPhones.join('\n'));
+        // Passar leads completos (com nome, endereço, etc.) para a I.A personalizar mensagens
+        const leadsComTelFormatado = validLeads.map(l => ({
+            ...l,
+            phoneFormatted: smartFormatPhone(l.phone, countryCode)
+        }));
+
+        onOpenWhatsApp(validPhones.join('\n'), leadsComTelFormatado);
     };
+
 
     const LeadCard = ({ lead, onDelete }) => (
         <div className="bg-slate-950/50 p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
@@ -308,13 +304,17 @@ const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) =
                             onBlur={() => fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
                             onKeyDown={e => e.key === 'Enter' && fetchDbLeads(1, filterQuery, websiteFilter, minStars, minReviews)}
                         />
-                        <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg px-2 text-sm text-white focus-within:border-red-500" title="Código do País para Adicionar na Exportação">
+                        <div
+                            className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg px-2 text-sm text-white focus-within:border-emerald-500"
+                            title="DDI do país (ex: 55 para Brasil, 1 para EUA). Deixe vazio para usar o número como está, sem adicionar código."
+                        >
                             <span className="text-slate-500 text-xs">+</span>
                             <input
-                                className="bg-transparent w-8 py-2 focus:outline-none text-center"
+                                className="bg-transparent w-10 py-2 focus:outline-none text-center font-mono"
                                 value={countryCode}
                                 onChange={e => setCountryCode(e.target.value.replace(/\D/g, ''))}
-                                placeholder="55"
+                                placeholder="DDI"
+                                maxLength={4}
                             />
                         </div>
                         <select

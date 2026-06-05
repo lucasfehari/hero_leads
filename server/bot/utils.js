@@ -14,7 +14,11 @@ const humanType = async (page, text) => {
 
     const inserted = await page.evaluate((t) => {
         const el = document.activeElement;
-        if (!el) return false;
+        if (!el || el === document.body) return false;
+
+        // Make sure the element is actually a text input or contenteditable
+        const isEditable = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.getAttribute('role') === 'textbox';
+        if (!isEditable) return false;
 
         // Clear existing content first
         el.focus();
@@ -193,4 +197,43 @@ function spinText(text) {
     return msg;
 }
 
-module.exports = { randomDelay, humanType, autoScroll, humanMove, scrollElement, smartClick, spinText };
+/**
+ * Replaces template variables with real profile data.
+ * This runs on EVERY message before sending — works in both AI and non-AI mode.
+ *
+ * Supported variables:
+ *   {nome}          → First name extracted from displayName (fallback: @username)
+ *   {nome_completo} → Full display name
+ *   {usuario}       → @username
+ *   {nicho}         → First meaningful phrase from bio (best-effort niche)
+ *   {bio}           → First 100 chars of bio
+ *
+ * Example template:
+ *   "Oi {nome}! Vi seu perfil de {nicho} e adorei o conteudo!"
+ *   → "Oi Mariana! Vi seu perfil de instrutora de pilates e adorei o conteudo!"
+ */
+function applyTemplateVars(template, username, profileContext = {}) {
+    if (!template) return '';
+    const { displayName = '', bioStub = '' } = profileContext;
+
+    // Extract first name (first word of displayName, letters only, fallback to @username)
+    const rawFirstName = (displayName || '').split(/\s+/)[0] || '';
+    const firstName = rawFirstName.replace(/[^a-zA-ZÀ-ÿ0-9]/g, '').trim() || username;
+
+    // Niche: first logical phrase from bio (before line breaks or common separators)
+    // Strips emojis and keeps clean readable text
+    const bioCleaned = (bioStub || '').replace(/[\r\n]+/g, ' ').trim();
+    const nichoMatch = bioCleaned.match(/^([^|\u2022\u00B7|/\\\u00B7\-\u2013\u2014\n]{3,50})/);
+    const nicho = nichoMatch
+        ? nichoMatch[1].replace(/[\u{1F000}-\u{1FFFF}]/gu, '').trim()
+        : '';
+
+    return template
+        .replace(/\{nome\}/gi,          firstName)
+        .replace(/\{nome_completo\}/gi, displayName || `@${username}`)
+        .replace(/\{usuario\}/gi,       `@${username}`)
+        .replace(/\{nicho\}/gi,         nicho)
+        .replace(/\{bio\}/gi,           bioCleaned.substring(0, 100));
+}
+
+module.exports = { randomDelay, humanType, autoScroll, humanMove, scrollElement, smartClick, spinText, applyTemplateVars };

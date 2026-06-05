@@ -15,6 +15,14 @@ const ConfigForm = ({ onStart, isRunning }) => {
         excludedKeywords: [],
         aiMode: false,
         aiPrompt: 'Procure por donos de clínicas de estética. Gere uma mensagem curta elogiando o trabalho deles.',
+        aiAutoMessage: false,
+        aiDontDo: '',
+        // Session Limits
+        sessionMaxActions: '',
+        stopAtTime: '',
+        sleepEnabled: false,
+        sleepStart: '23:00',
+        sleepEnd: '08:00',
     });
     const [excludedInput, setExcludedInput] = useState('');
     const [dmSteps, setDmSteps] = useState([]); // [{type:'text'|'audio', text?, audioBlob?, audioUrl?, audioFilename?, audioServerPath?}]
@@ -26,7 +34,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
             try {
                 const parsed = JSON.parse(savedConfig);
                 setConfig(prev => ({ ...prev, ...parsed }));
-            } catch (e) {}
+            } catch (e) { }
         }
     }, []);
 
@@ -77,7 +85,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
         }
 
         const dmTemplate = parts.join(' ;;; ');
-        
+
         onStart({ ...config, profile: selectedProfile, dmTemplate, audios: finalAudios });
     };
 
@@ -290,8 +298,14 @@ const ConfigForm = ({ onStart, isRunning }) => {
             </div>
 
             {/* AI PROSPECTING MODE */}
-            <div className="bg-slate-900/50 p-4 rounded-xl border border-white/5 space-y-3" style={config.aiMode ? { borderColor: 'rgba(56, 189, 248, 0.4)' } : {}}>
-                <div className="flex items-center justify-between">
+            <div
+                className="rounded-xl border overflow-hidden transition-all"
+                style={config.aiMode || config.aiAutoMessage
+                    ? { background: 'rgba(1,3,38,0.6)', borderColor: 'rgba(56,189,248,0.35)' }
+                    : { background: 'rgba(1,3,38,0.3)', borderColor: 'rgba(255,255,255,0.06)' }}
+            >
+                {/* Header row */}
+                <div className="flex items-center justify-between px-4 py-3">
                     <label className="text-sm font-medium text-sky-400 flex items-center gap-2">
                         <Brain className="w-4 h-4 text-sky-400" /> Prospecção com I.A. (OpenRouter)
                     </label>
@@ -304,9 +318,10 @@ const ConfigForm = ({ onStart, isRunning }) => {
                         disabled={isRunning}
                     />
                 </div>
-                
+
+                {/* Campaign Prompt — shows when aiMode ON */}
                 {config.aiMode && (
-                    <div className="space-y-4 pt-2 animate-in fade-in slide-in-from-top-2">
+                    <div className="px-4 pb-3 animate-in fade-in slide-in-from-top-2">
                         <div className="bg-slate-800/50 p-3 rounded-lg border border-sky-500/20">
                             <label className="text-xs text-sky-300 font-semibold mb-1 block">🎯 Objetivo da Campanha (Prompt Alvo)</label>
                             <p className="text-[10px] text-slate-400 mb-2">Descreva exatamente que tipo de lead a IA deve buscar hoje.</p>
@@ -322,6 +337,80 @@ const ConfigForm = ({ onStart, isRunning }) => {
                         </div>
                     </div>
                 )}
+
+                {/* ─── 🤖 AI AUTO MESSAGE — always visible inside this card ─── */}
+                <div
+                    className="mx-4 mb-4 rounded-xl p-4 space-y-3 border transition-all"
+                    style={config.aiAutoMessage
+                        ? { background: 'linear-gradient(135deg, rgba(168,85,247,0.14), rgba(56,189,248,0.07))', borderColor: 'rgba(168,85,247,0.5)' }
+                        : { background: 'rgba(168,85,247,0.04)', borderColor: 'rgba(168,85,247,0.18)' }}
+                >
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                            <label className="text-sm font-bold flex items-center gap-2 cursor-pointer" style={{ color: config.aiAutoMessage ? '#e9d5ff' : '#a78bfa' }}>
+                                <span className="text-lg">🤖</span>
+                                Deixe a I.A. enviar a mensagem
+                                {config.aiAutoMessage && (
+                                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full animate-pulse" style={{ background: 'rgba(168,85,247,0.25)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
+                                        ATIVO
+                                    </span>
+                                )}
+                            </label>
+                            <p className="text-xs mt-1" style={{ color: '#64748b' }}>
+                                A I.A. lê o perfil e escreve uma mensagem 100% personalizada para converter — sem usar o template manual.
+                            </p>
+                        </div>
+                        <input
+                            id="aiAutoMessage"
+                            type="checkbox"
+                            checked={config.aiAutoMessage || false}
+                            onChange={(e) => setConfig({
+                                ...config,
+                                aiAutoMessage: e.target.checked,
+                                // Auto-enable aiMode when aiAutoMessage is turned on
+                                aiMode: e.target.checked ? true : config.aiMode
+                            })}
+                            className="w-5 h-5 accent-purple-500 rounded cursor-pointer mt-0.5 shrink-0"
+                            disabled={isRunning}
+                        />
+                    </div>
+
+                    {config.aiAutoMessage && (
+                        <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-2">
+
+                            {/* Restrictions */}
+                            <div>
+                                <label className="text-xs font-semibold mb-1.5 flex items-center gap-1.5" style={{ color: '#fca5a5' }}>
+                                    <span>🚫</span> O que a I.A. NÃO deve fazer
+                                </label>
+                                <textarea
+                                    id="aiDontDo"
+                                    name="aiDontDo"
+                                    value={config.aiDontDo || ''}
+                                    onChange={handleChange}
+                                    rows={3}
+                                    className="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-all resize-none placeholder:text-slate-600"
+                                    style={{ background: 'rgba(1,3,38,0.7)', border: '1px solid rgba(248,113,113,0.3)' }}
+                                    placeholder={"Ex:\n- Não mencionar preços ou valores\n- Não usar palavras como \"gratis\"\n- Não ser muito formal ou robótico\n- Não mandar links externos"}
+                                    disabled={isRunning}
+                                />
+                                <p className="text-xs mt-1" style={{ color: '#475569' }}>Deixe em branco se não houver restrições.</p>
+                            </div>
+
+                            {/* How it works */}
+                            <div className="rounded-lg p-3 text-xs" style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(168,85,247,0.15)' }}>
+                                <p className="font-semibold mb-1.5" style={{ color: '#a78bfa' }}>💡 Como funciona:</p>
+                                <ol className="list-decimal list-inside space-y-1" style={{ color: '#64748b' }}>
+                                    <li>Analisa o perfil: bio, nome, nicho</li>
+                                    <li>Decide se é lead com base no Objetivo acima</li>
+                                    <li>Escreve mensagem citando dados reais do perfil</li>
+                                    <li>Escolhe CTA ideal para converter aquela pessoa</li>
+                                    <li>Envia — template manual ignorado</li>
+                                </ol>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* ROTATION SETTINGS */}
@@ -355,6 +444,113 @@ const ConfigForm = ({ onStart, isRunning }) => {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* SESSION LIMITS */}
+            <div
+                className="rounded-xl border p-4 space-y-4"
+                style={{ background: 'rgba(99,102,241,0.05)', borderColor: 'rgba(99,102,241,0.22)' }}
+            >
+                <div>
+                    <label className="text-sm font-semibold flex items-center gap-2" style={{ color: '#a5b4fc' }}>
+                        🛡️ Limites de Sessão
+                        <span className="text-xs font-normal" style={{ color: '#475569' }}>— segurança automática</span>
+                    </label>
+                    <p className="text-xs mt-0.5" style={{ color: '#475569' }}>
+                        O bot para sozinho quando atingir qualquer um desses limites.
+                    </p>
+                </div>
+
+                {/* Row: Max interactions + Stop at time */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-xs font-medium mb-1.5 block" style={{ color: '#94a3b8' }}>
+                            🎯 Máx. de pessoas (sessão)
+                        </label>
+                        <input
+                            id="sessionMaxActions"
+                            type="number"
+                            name="sessionMaxActions"
+                            value={config.sessionMaxActions || ''}
+                            onChange={handleChange}
+                            min="1"
+                            placeholder="Ex: 50"
+                            className="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-all placeholder:text-slate-600"
+                            style={{ background: 'rgba(1,3,38,0.6)', border: '1px solid rgba(99,102,241,0.25)' }}
+                            disabled={isRunning}
+                        />
+                        <p className="text-xs mt-1" style={{ color: '#475569' }}>Para ao interagir com N pessoas</p>
+                    </div>
+                    <div>
+                        <label className="text-xs font-medium mb-1.5 block" style={{ color: '#94a3b8' }}>
+                            ⏰ Parar às (horário)
+                        </label>
+                        <input
+                            id="stopAtTime"
+                            type="time"
+                            name="stopAtTime"
+                            value={config.stopAtTime || ''}
+                            onChange={handleChange}
+                            className="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-all"
+                            style={{ background: 'rgba(1,3,38,0.6)', border: '1px solid rgba(99,102,241,0.25)', colorScheme: 'dark' }}
+                            disabled={isRunning}
+                        />
+                        <p className="text-xs mt-1" style={{ color: '#475569' }}>Encerra a sessão nesse horário</p>
+                    </div>
+                </div>
+
+                {/* Sleep schedule */}
+                <div className="rounded-lg p-3 space-y-3" style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)' }}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <label className="text-xs font-semibold flex items-center gap-1.5" style={{ color: '#a5b4fc' }}>
+                                😴 Modo Sono
+                            </label>
+                            <p className="text-xs mt-0.5" style={{ color: '#475569' }}>Bot pausa entre esses horários (suporte overnight)</p>
+                        </div>
+                        <input
+                            id="sleepEnabled"
+                            type="checkbox"
+                            name="sleepEnabled"
+                            checked={config.sleepEnabled || false}
+                            onChange={(e) => setConfig({ ...config, sleepEnabled: e.target.checked })}
+                            className="w-4 h-4 accent-indigo-500 rounded cursor-pointer"
+                            disabled={isRunning}
+                        />
+                    </div>
+
+                    {config.sleepEnabled && (
+                        <div className="flex items-end gap-2 animate-in fade-in slide-in-from-top-1">
+                            <div className="flex-1">
+                                <p className="text-xs mb-1" style={{ color: '#64748b' }}>Dormir às</p>
+                                <input
+                                    id="sleepStart"
+                                    type="time"
+                                    name="sleepStart"
+                                    value={config.sleepStart || '23:00'}
+                                    onChange={handleChange}
+                                    className="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                                    style={{ background: 'rgba(1,3,38,0.7)', border: '1px solid rgba(99,102,241,0.3)', colorScheme: 'dark' }}
+                                    disabled={isRunning}
+                                />
+                            </div>
+                            <span className="pb-2.5 font-bold" style={{ color: '#4f46e5' }}>→</span>
+                            <div className="flex-1">
+                                <p className="text-xs mb-1" style={{ color: '#64748b' }}>Acordar às</p>
+                                <input
+                                    id="sleepEnd"
+                                    type="time"
+                                    name="sleepEnd"
+                                    value={config.sleepEnd || '08:00'}
+                                    onChange={handleChange}
+                                    className="w-full rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                                    style={{ background: 'rgba(1,3,38,0.7)', border: '1px solid rgba(99,102,241,0.3)', colorScheme: 'dark' }}
+                                    disabled={isRunning}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* STRATEGY SETTINGS 
@@ -499,7 +695,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
                                 if (e.key === 'Backspace' && !excludedInput && (config.excludedKeywords || []).length > 0) {
                                     setConfig(c => ({ ...c, excludedKeywords: c.excludedKeywords.slice(0, -1) }));
                                 }
-            }}
+                            }}
                             disabled={isRunning}
                             placeholder="Digite e pressione Enter... (ex: concorrente, agência, bot)"
                             className="flex-1 rounded-lg px-3 py-2 text-sm text-white focus:outline-none transition-all placeholder:text-slate-600"
@@ -547,6 +743,41 @@ const ConfigForm = ({ onStart, isRunning }) => {
                         steps={dmSteps}
                         onChange={setDmSteps}
                     />
+
+                    {/* Template Variables Hint */}
+                    <div className="mt-3 rounded-lg p-3" style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.18)' }}>
+                        <p className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: '#c4b5fd' }}>
+                            <span>✨</span> Variáveis de Personalização — substituídas automaticamente por dados reais de cada perfil
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2">
+                            {[
+                                ['{nome}', 'Primeiro nome (ex: Mariana)'],
+                                ['{nome_completo}', 'Nome completo do perfil'],
+                                ['{usuario}', '@username do perfil'],
+                                ['{nicho}', 'Primeira frase da bio (ex: Dentista)'],
+                                ['{bio}', 'Primeiros 100 caracteres da bio'],
+                            ].map(([variable, desc]) => (
+                                <div key={variable} className="flex items-baseline gap-1.5">
+                                    <code
+                                        className="text-xs font-mono px-1.5 py-0.5 rounded shrink-0"
+                                        style={{ background: 'rgba(168,85,247,0.15)', color: '#e9d5ff' }}
+                                    >{variable}</code>
+                                    <span className="text-xs" style={{ color: '#64748b' }}>{desc}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="rounded p-2 text-xs" style={{ background: 'rgba(0,0,0,0.25)' }}>
+                            <span style={{ color: '#64748b' }}>Exemplo: </span>
+                            <span style={{ color: '#a78bfa' }}>
+                                "Oi {'{nome}'}, vi que você atua em {'{nicho}'}! Tenho algo que pode te ajudar 🚀"
+                            </span>
+                            <br />
+                            <span style={{ color: '#475569' }}>→ </span>
+                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                                "Oi Mariana, vi que você atua em Clínica de Estética! Tenho algo que pode te ajudar 🚀"
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
 

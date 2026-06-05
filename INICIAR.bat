@@ -180,7 +180,41 @@ if not exist "%~dp0server\.env" (
 )
 
 :: ─────────────────────────────────────────────────────────────
-:: PASSO 6: Iniciar Backend (porta 3000)
+:: PASSO 6: Verificar e liberar portas 3000 e 5173
+:: ─────────────────────────────────────────────────────────────
+echo.
+echo  [*] Verificando portas 3000 e 5173...
+
+:: Verificar porta 3000 (Backend)
+set "PORT3000_PID="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3000 " ^| findstr "LISTENING"') do (
+    if not defined PORT3000_PID set "PORT3000_PID=%%p"
+)
+if defined PORT3000_PID (
+    echo  [!] Porta 3000 em uso pelo processo PID !PORT3000_PID!. Encerrando...
+    taskkill /PID !PORT3000_PID! /F >nul 2>&1
+    timeout /t 1 /nobreak >nul
+    echo  [OK] Porta 3000 liberada.
+) else (
+    echo  [OK] Porta 3000 livre.
+)
+
+:: Verificar porta 5173 (Frontend)
+set "PORT5173_PID="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":5173 " ^| findstr "LISTENING"') do (
+    if not defined PORT5173_PID set "PORT5173_PID=%%p"
+)
+if defined PORT5173_PID (
+    echo  [!] Porta 5173 em uso pelo processo PID !PORT5173_PID!. Encerrando...
+    taskkill /PID !PORT5173_PID! /F >nul 2>&1
+    timeout /t 1 /nobreak >nul
+    echo  [OK] Porta 5173 liberada.
+) else (
+    echo  [OK] Porta 5173 livre.
+)
+
+:: ─────────────────────────────────────────────────────────────
+:: PASSO 7: Iniciar Backend (porta 3000)
 :: ─────────────────────────────────────────────────────────────
 echo.
 echo  [*] Iniciando Servidor Backend na porta 3000...
@@ -188,11 +222,11 @@ start "Browze Bot — Backend" cmd /k "title Browze Bot ^| Backend ^(porta 3000^
 timeout /t 4 /nobreak >nul
 
 :: ─────────────────────────────────────────────────────────────
-:: PASSO 7: Iniciar Frontend (porta 5173)
+:: PASSO 8: Iniciar Frontend (porta 5173)
 :: ─────────────────────────────────────────────────────────────
 echo  [*] Iniciando Interface na porta 5173...
 start "Browze Bot — Interface" cmd /k "title Browze Bot ^| Interface ^(porta 5173^) && cd /d ""%~dp0client"" && npm run dev"
-timeout /t 4 /nobreak >nul
+timeout /t 5 /nobreak >nul
 
 :: ─────────────────────────────────────────────────────────────
 :: PRONTO
@@ -204,6 +238,8 @@ echo  ║   BROWZE BOT INICIADO COM SUCESSO!                ║
 echo  ║                                                   ║
 echo  ║   Acesse: http://localhost:5173                   ║
 echo  ║                                                   ║
+echo  ║   Backend:  http://localhost:3000                 ║
+echo  ║                                                   ║
 echo  ║   ATENÇÃO: Não feche as janelas pretas!           ║
 echo  ║                                                   ║
 echo  ╚═══════════════════════════════════════════════════╝
@@ -211,3 +247,4 @@ echo.
 
 start "" "http://localhost:5173"
 pause
+
