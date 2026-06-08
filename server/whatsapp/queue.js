@@ -83,11 +83,21 @@ class MessageQueue {
 
         const sessionName = this.getSessionName();
         const badNumbers = loadBadNumbers(sessionName);
-        const tasks = list.map(num => ({
-            number: num.replace(/\D/g, '') + '@c.us',
-            rawNumber: num.replace(/\D/g, ''),
-            messages: messages
-        })).filter(t => !badNumbers.has(t.number));
+        const tasks = list.map(num => {
+            let rawNum = num.replace(/\D/g, '');
+            // Auto-corrige números do Brasil (10 ou 11 dígitos) que vieram sem o DDI 55
+            if ((rawNum.length === 10 || rawNum.length === 11) && !rawNum.startsWith('55')) {
+                const ddd = parseInt(rawNum.substring(0, 2), 10);
+                if (ddd >= 11 && ddd <= 99) {
+                    rawNum = '55' + rawNum;
+                }
+            }
+            return {
+                number: rawNum + '@c.us',
+                rawNumber: rawNum,
+                messages: messages
+            };
+        }).filter(t => !badNumbers.has(t.number));
 
         const skipped = numbers.length - tasks.length;
         if (skipped > 0) this.notifyStatus('bad_numbers_skipped', { count: skipped });

@@ -316,6 +316,13 @@ function App() {
     } catch (error) { addLog('Error stopping bot: ' + error.message, 'error'); }
   };
 
+  const handleRestartWhatsApp = async () => {
+    try {
+      addWaLog('Reiniciando conexão WhatsApp...', 'warning');
+      await fetch('http://localhost:3000/api/whatsapp/restart', { method: 'POST' });
+    } catch (error) { addWaLog('Erro ao reiniciar: ' + error.message, 'error'); }
+  };
+
   const exportMapsCSV = () => {
     if (!mapsResults.length) return;
     const headers = ['Name', 'Phone', 'Address', 'Website'];
@@ -555,10 +562,16 @@ function App() {
                       <div className="flex flex-col items-center gap-3 text-slate-500">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="w-12 h-12 opacity-20"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12.01" y2="18" /></svg>
                         <p className="text-sm">Aguardando QR Code ou Conexão...</p>
+                        <button
+                          onClick={handleRestartWhatsApp}
+                          className="mt-2 px-4 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition-all font-medium text-sm"
+                        >
+                          Gerar Novo QR Code / Conectar
+                        </button>
                       </div>
                     )}
                   </Panel>
-                  <div className="flex-1 min-h-[300px]">
+                  <div className="flex-1 flex flex-col min-h-[300px]">
                     <LiveTerminal logs={waLogs} title="WhatsApp Activity" />
                   </div>
                 </div>

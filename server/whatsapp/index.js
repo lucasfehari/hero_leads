@@ -66,10 +66,26 @@ class WhatsAppService {
         this.createClient('default');
     }
 
-    createClient(sessionName) {
+    async createClient(sessionName) {
         if (this.client) {
-            try { this.client.destroy(); } catch (e) { /* ignore */ }
+            try { 
+                if (this.client.pupBrowser) {
+                    try {
+                        const proc = this.client.pupBrowser.process();
+                        if (proc) proc.kill('SIGKILL');
+                    } catch (e) {}
+                }
+                await this.client.destroy(); 
+            } catch (e) { /* ignore */ }
+            // wait for puppeteer to release locks
+            await new Promise(r => setTimeout(r, 2000));
         }
+
+        // Tenta remover o SingletonLock caso tenha ficado preso
+        try {
+            const lockFile = path.join(SESSIONS_DIR, `session-${sessionName}`, 'SingletonLock');
+            if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+        } catch (e) { /* ignore */ }
 
         this.currentSession = sessionName;
         this.isConnected = false;
@@ -189,7 +205,16 @@ class WhatsAppService {
         });
 
         console.log(`Initializing WhatsApp Client (session: ${this.currentSession})...`);
-        this.client.initialize();
+        this.client.initialize().catch(e => {
+            console.error(`[System] Erro crítico na inicialização do WhatsApp (${this.currentSession}):`, e.message);
+            this.io.emit('wa-status', { status: 'error', message: 'Erro ao iniciar o navegador. Reiniciando...' });
+            
+            // Tenta recriar o cliente após 3 segundos se houver crash
+            setTimeout(() => {
+                console.log(`[System] Auto-restarting WhatsApp Client (${this.currentSession})...`);
+                this.createClient(this.currentSession);
+            }, 3000);
+        });
     }
 
     listSessions() {
@@ -223,7 +248,7 @@ class WhatsAppService {
             return { success: false, error: 'Already on this session' };
         }
         this.io.emit('wa-status', { status: 'switching', session: sessionName });
-        this.createClient(sessionName);
+        await this.createClient(sessionName);
         return { success: true, session: sessionName };
     }
 
@@ -233,7 +258,11 @@ class WhatsAppService {
         }
         const sessionPath = path.join(SESSIONS_DIR, `session-${sessionName}`);
         if (fs.existsSync(sessionPath)) {
-            fs.rmSync(sessionPath, { recursive: true, force: true });
+            try {
+                fs.rmSync(sessionPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 });
+            } catch (e) {
+                console.warn(`[System] Erro EPERM ignorado ao apagar pasta da sessão: ${sessionPath}`);
+            }
             metaDb.prepare(`DELETE FROM session_meta WHERE name = ?`).run(sessionName);
             return { success: true };
         }

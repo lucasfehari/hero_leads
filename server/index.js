@@ -726,6 +726,20 @@ app.post('/api/whatsapp/sessions/switch', async (req, res) => {
     }
 });
 
+app.post('/api/whatsapp/restart', async (req, res) => {
+    try {
+        // Força a recriação do cliente da sessão atual
+        if (waClient.client) {
+            try { waClient.client.destroy(); } catch (e) {}
+        }
+        waClient.isConnected = false;
+        const result = await waClient.switchSession(waClient.currentSession);
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Delete a session (cannot delete active)
 app.delete('/api/whatsapp/sessions/:name', (req, res) => {
     try {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Send, Clock, Play, List, Plus, Trash2, ChevronDown, ChevronUp,
     Users, RefreshCw, LogIn, CheckCircle, ShieldCheck, ShieldAlert,
@@ -45,6 +45,7 @@ const NumInput = ({ label, value, onChange, unit, min = 1 }) => (
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
 const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
+    const abortAiRef = useRef(false);
     // Session
     const [sessions, setSessions] = useState([]);
     const [currentSession, setCurrentSession] = useState('default');
@@ -254,6 +255,7 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
         const model = localStorage.getItem('openRouterModel') || 'openai/gpt-4o-mini';
         const companyContext = localStorage.getItem('companyContext') || '';
 
+        abortAiRef.current = false;
         const total = aiContacts.length;
         setIsGenerating(true);
         setAiProgress({ done: 0, total });
@@ -274,6 +276,10 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
         const CHUNK = 8;
         try {
             for (let i = 0; i < leadsToSend.length; i += CHUNK) {
+                if (abortAiRef.current) {
+                    console.log('Geração de I.A cancelada pelo usuário.');
+                    break;
+                }
                 const chunk = leadsToSend.slice(i, i + CHUNK);
                 const res = await fetch('http://localhost:3000/api/ai/generate-messages', {
                     method: 'POST',
@@ -500,9 +506,17 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
                             }}>
                             {isGenerating ? (
                                 <>
-                                    <div className="flex items-center gap-2">
-                                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.3" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
-                                        <span>Gerando... {aiProgress.done}/{aiProgress.total}</span>
+                                    <div className="flex items-center justify-between w-full">
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.3" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
+                                            <span>Gerando... {aiProgress.done}/{aiProgress.total}</span>
+                                        </div>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); abortAiRef.current = true; }}
+                                            className="bg-red-500/20 text-red-300 hover:bg-red-500/40 px-3 py-1 rounded-lg text-xs font-bold border border-red-500/30 transition-colors"
+                                        >
+                                            Cancelar
+                                        </button>
                                     </div>
                                     {/* Barra de progresso */}
                                     <div className="w-full h-1 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.1)' }}>
@@ -986,8 +1000,13 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
 
             {/* ── NÚMEROS ──────────────────────────────────────────────── */}
             <div>
-                <label className="text-sm font-medium text-slate-300 mb-2 block">
-                    Números <span className="text-slate-500 text-xs">(um por linha)</span>
+                <label className="text-sm font-medium text-slate-300 mb-2 flex justify-between items-center">
+                    <span>Números <span className="text-slate-500 text-xs">(um por linha)</span></span>
+                    {numbers.trim() && (
+                        <span className="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-mono">
+                            {numbers.split(/[\n,]+/).map(n => n.trim()).filter(Boolean).length} contatos
+                        </span>
+                    )}
                 </label>
                 <textarea
                     className="w-full bg-slate-950/50 border border-slate-700 rounded-xl p-4 text-sm text-slate-200 h-32 outline-none resize-none custom-scrollbar transition-all hover:border-slate-600 focus:ring-2 focus:ring-green-500/50"

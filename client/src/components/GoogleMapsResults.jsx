@@ -149,20 +149,30 @@ const GoogleMapsResults = ({ results: liveResults, onExport, onOpenWhatsApp }) =
     };
 
     const handleSendToCampaign = () => {
-        if (dbLeads.length === 0) return alert('Sem leads para campanha.');
+        if (dbTotal === 0) return alert('Sem leads para campanha.');
 
-        const validLeads = dbLeads.filter(l => l.whatsapp_valid !== 0 && l.phone);
-        const validPhones = validLeads.map(l => smartFormatPhone(l.phone, countryCode));
+        const params = new URLSearchParams({
+            page: 1, limit: 99999, query: filterQuery, hasWebsite: websiteFilter, minStars: minStars || 0, minReviews: minReviews || 0
+        });
 
-        if (validPhones.length === 0) return alert('Nenhum telefone encontrado nos filtros!');
+        fetch(`http://localhost:3000/api/maps/leads?${params}`)
+            .then(r => r.json())
+            .then(data => {
+                const leads = data.leads || [];
+                const validLeads = leads.filter(l => l.whatsapp_valid !== 0 && l.phone);
+                const validPhones = validLeads.map(l => smartFormatPhone(l.phone, countryCode));
 
-        // Passar leads completos (com nome, endereço, etc.) para a I.A personalizar mensagens
-        const leadsComTelFormatado = validLeads.map(l => ({
-            ...l,
-            phoneFormatted: smartFormatPhone(l.phone, countryCode)
-        }));
+                if (validPhones.length === 0) return alert('Nenhum telefone válido encontrado nos filtros!');
 
-        onOpenWhatsApp(validPhones.join('\n'), leadsComTelFormatado);
+                // Passar leads completos (com nome, endereço, etc.) para a I.A personalizar mensagens
+                const leadsComTelFormatado = validLeads.map(l => ({
+                    ...l,
+                    phoneFormatted: smartFormatPhone(l.phone, countryCode)
+                }));
+
+                onOpenWhatsApp(validPhones.join('\n'), leadsComTelFormatado);
+            })
+            .catch(e => alert('Erro ao buscar leads completos: ' + e.message));
     };
 
 
