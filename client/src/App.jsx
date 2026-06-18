@@ -244,7 +244,8 @@ function App() {
   const [status, setStatus] = useState('Idle');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mapsResults, setMapsResults] = useState([]);
-  const [qrCode, setQrCode] = useState(null);
+  const [qrCode, setQrCode] = useState(null); 
+  const [qrExpired, setQrExpired] = useState(false);
   const [waPrefillNumbers, setWaPrefillNumbers] = useState('');
   const [waPrefillLeads, setWaPrefillLeads] = useState([]);
   const [showAITerminal, setShowAITerminal] = useState(false);
@@ -277,6 +278,17 @@ function App() {
       ['connect', 'log', 'maps-data', 'wa-qr', 'wa-status', 'disconnect'].forEach(e => socket.off(e));
     };
   }, []);
+
+  useEffect(() => {
+    let timeout;
+    if (qrCode) {
+      setQrExpired(false);
+      timeout = setTimeout(() => {
+        setQrExpired(true);
+      }, 40000); // 40 seconds
+    }
+    return () => clearTimeout(timeout);
+  }, [qrCode]);
 
   const addLog = (message, type = 'info') => setLogs((prev) => [...prev, { timestamp: new Date().toISOString(), message, type }]);
   const addWaLog = (message, type = 'info') => setWaLogs((prev) => [...prev, { timestamp: new Date().toISOString(), message, type }]);
@@ -550,13 +562,35 @@ function App() {
                   <Panel className="flex flex-col items-center justify-center min-h-[260px] p-6">
                     {qrCode ? (
                       <div className="flex flex-col items-center gap-4">
-                        <div className="bg-white p-4 rounded-2xl shadow-2xl shadow-black/50">
-                          <QRCodeSVG value={qrCode} size={180} />
-                        </div>
-                        <div className="text-center">
-                          <p className="text-white font-bold text-sm">Escaneie para conectar</p>
-                          <p className="text-slate-400 text-xs mt-1">WhatsApp → Menu → Aparelhos Conectados</p>
-                        </div>
+                        {qrExpired ? (
+                          <div className="flex flex-col items-center gap-3 py-4">
+                            <div className="bg-slate-800/50 p-4 rounded-2xl text-center border border-white/5">
+                              <p className="text-slate-400 text-sm mb-3">O QR Code expirou por inatividade.</p>
+                              <button
+                                onClick={handleRestartWhatsApp}
+                                className="px-4 py-2 bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 rounded-lg text-sm font-medium transition-all"
+                              >
+                                Gerar novo QR Code
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="bg-white p-4 rounded-2xl shadow-2xl shadow-black/50">
+                              <QRCodeSVG value={qrCode} size={180} />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-white font-bold text-sm">Escaneie para conectar</p>
+                              <p className="text-slate-400 text-xs mt-1">WhatsApp → Menu → Aparelhos Conectados</p>
+                              <button
+                                onClick={handleRestartWhatsApp}
+                                className="mt-3 text-xs text-blue-400 hover:text-blue-300 underline"
+                              >
+                                Gerar novo QR Code manualmente
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="flex flex-col items-center gap-3 text-slate-500">

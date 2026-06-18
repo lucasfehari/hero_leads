@@ -16,7 +16,7 @@ const storage = multer.diskStorage({
         cb(null, unique + path.extname(file.originalname));
     }
 });
-const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB per file
+const upload = multer({ storage, limits: { fileSize: 2000 * 1024 * 1024 } }); // 2000MB per file
 
 // ── Upload endpoint (supports single OR multiple files) ───────────────────
 router.post('/upload', upload.array('media', 10), (req, res) => {

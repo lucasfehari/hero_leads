@@ -524,7 +524,7 @@ function PostComposer({ accounts, editingPost, onSaved, onCancel }) {
                                 ? `Arraste ou clique para adicionar (${mediaItems.length}/${maxFiles})`
                                 : 'Arraste ou clique para enviar'}
                         </p>
-                        <p className="text-xs opacity-50">JPG, PNG, MP4, MOV — até 500MB</p>
+                        <p className="text-xs opacity-50">JPG, PNG, MP4, MOV — até 2000MB (2GB)</p>
                     </div>
                 )}
                 <input ref={fileRef} type="file" accept="image/*,video/*"

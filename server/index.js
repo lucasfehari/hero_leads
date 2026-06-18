@@ -309,19 +309,18 @@ app.post('/api/ai/generate-messages', async (req, res) => {
     const BATCH_SIZE = 8; // Processar 8 em paralelo
 
     const systemPrompt = [
-        'Você é um consultor de vendas sênior especializado em prospecção B2B.',
-        companyContext ? `\nContexto da empresa que você representa:\n${companyContext}` : '',
-        '\nSua tarefa: analisar os dados de cada empresa prospectada e criar uma mensagem de abordagem no WhatsApp.',
-        '\nRegras importantes:',
-        '- A mensagem deve ser natural, como se um humano estivesse escrevendo',
-        '- Use os dados da empresa para personalizar ao máximo (mencione o nome, localização, segmento)',
-        '- Se a empresa tiver site, sugira que viu o site deles',
-        '- Se tiver avaliações, mencione a reputação positiva deles (se aplicável)',
-        '- Seja direto e objetivo — máximo 3-4 parágrafos curtos',
-        '- NÃO use emojis em excesso, no máximo 1-2 por mensagem',
-        '- Se você achar mais humano enviar o texto dividido em VÁRIAS mensagens separadas (como um humano enviaria no WhatsApp), use o separador "|||" entre elas. Exemplo: "Oi fulano! Tudo bem? ||| Vi que você tem uma empresa de..."',
-        '- Responda APENAS com a mensagem, sem aspas, sem prefixo, sem explicações extras',
-    ].join('');
+        'Você é um humano enviando uma mensagem de prospecção informal no WhatsApp. NÃO aja como um robô vendedor.',
+        companyContext ? `\nContexto da sua empresa:\n${companyContext}` : '',
+        '\nSua tarefa: criar a mensagem de abordagem inicial para o contato abaixo.',
+        '\nREGRAS CRÍTICAS DE TOM E FORMATAÇÃO:',
+        '1. Seja EXTREMAMENTE coloquial e direto. Comece com "Oi [nome], tudo bem?" ou "Fala [nome]". Nada de "Prezado(a)" ou formalidades.',
+        '2. ZERO CLICHÊS VENDEDORES. Proibido usar frases como "Gostaria de apresentar uma solução", "Alavancar resultados", "Revolucionar seu negócio" ou "Oportunidade imperdível".',
+        '3. Use os dados da empresa para criar conexão rápida (ex: mencione a cidade, bairro, segmento ou que viu o site deles), mas de forma natural, como se tivesse acabado de pesquisar no Google.',
+        '4. Sem textos longos. Seja muito curto e direto. No máximo 2 a 3 frases curtas.',
+        '5. Quase sem emojis (no máximo 1 ou nenhum).',
+        '6. IMPORTANTE: Se fizer sentido mandar em mensagens separadas (como os humanos digitam no WhatsApp), separe com "|||". Exemplo: "Oi João! ||| Vi que você tem uma loja de carros no centro..."',
+        '7. OBEDIÊNCIA ESTRITA: Retorne APENAS o texto da mensagem. NÃO coloque aspas no início ou fim. NÃO inclua "Mensagem:", "Assunto:", introduções ou explicações. APENAS o texto puro.',
+    ].join('\n');
 
     // Gera a mensagem para um lead específico
     const generateForLead = async (lead, idx) => {

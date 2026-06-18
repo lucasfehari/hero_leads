@@ -90,6 +90,7 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
     const [aiSectionOpen, setAiSectionOpen] = useState(false);
     const [aiProgress, setAiProgress] = useState({ done: 0, total: 0 }); // progress tracker
     const [splitAiMessage, setSplitAiMessage] = useState(true); // Toggle para enviar parágrafos como mensagens separadas
+    const [savedPrompts, setSavedPrompts] = useState([]);
 
     // Opt-Out config
     const [optOutConfig, setOptOutConfig] = useState({
@@ -166,6 +167,11 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
 
         loadOptOutConfig();
 
+        const storedPrompts = localStorage.getItem('savedAiPrompts');
+        if (storedPrompts) {
+            try { setSavedPrompts(JSON.parse(storedPrompts)); } catch (e) {}
+        }
+
         if (prefillNumbers) {
             setNumbers(prefillNumbers);
         }
@@ -177,6 +183,22 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
             socket.off('wa-optout');
         };
     }, [loadSessions, loadWarmup, loadOptOutConfig, prefillNumbers]);
+
+    const handleSavePrompt = () => {
+        if (!aiPrompt.trim()) return;
+        const name = prompt('Dê um nome para este prompt:');
+        if (!name) return;
+        const newPrompts = [...savedPrompts, { name, text: aiPrompt }];
+        setSavedPrompts(newPrompts);
+        localStorage.setItem('savedAiPrompts', JSON.stringify(newPrompts));
+    };
+
+    const handleDeletePrompt = (index) => {
+        if (!window.confirm('Excluir este prompt salvo?')) return;
+        const newPrompts = savedPrompts.filter((_, i) => i !== index);
+        setSavedPrompts(newPrompts);
+        localStorage.setItem('savedAiPrompts', JSON.stringify(newPrompts));
+    };
 
     // Quando chegam leads do Maps, montar tabela de contatos para I.A
     useEffect(() => {
@@ -314,47 +336,15 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
 
     // ── Iniciar campanha ──────────────────────────────────────────────────────
     const handleStart = async () => {
-        // Modo I.A com tabela de contatos
-        if (aiEnabled && aiContacts.length > 0) {
-            const enabledContacts = aiContacts.filter(c => c.enabled && c.phone && c.message.trim());
-            if (enabledContacts.length === 0) return alert('Nenhum contato habilitado com mensagem gerada. Gere as mensagens com I.A primeiro!');
-
-            setStatusHistory([]);
-            // Enviar um por um com mensagem individual
-            for (const contact of enabledContacts) {
-                try {
-                    let finalMessages = [contact.message];
-                    if (splitAiMessage) {
-                        // Divide pelo separador inteligente da I.A (|||)
-                        finalMessages = contact.message.split('|||').map(m => m.trim()).filter(m => m.length > 0);
-                    }
-
-                    await fetch(`${API}/start`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            numbers: [contact.phone],
-                            messages: finalMessages,
-                            config
-                        })
-                    });
-                } catch (e) { console.error('Erro ao enfileirar:', e); }
-            }
-            return;
-        }
-
-        // Modo Manual
-        const numberList = numbers.split(/[\n,]+/).map(n => n.trim()).filter(Boolean);
-        
+        // Obter mensagens manuais previamente configuradas
         const validMessages = [];
         let audioIdx = 0;
-
         for (const step of waSteps) {
             if (step.type === 'text') {
                 if (step.text?.trim()) validMessages.push(step.text.trim());
             } else if (step.type === 'audio') {
                 audioIdx++;
                 const tag = `wa-audio-${audioIdx}`;
-
                 if (step.audioServerPath) {
                     validMessages.push({ type: 'audio', path: step.audioServerPath });
                 } else if (step.audioBlob) {
@@ -366,17 +356,55 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
                         const data = await res.json();
                         if (data.success) {
                             validMessages.push({ type: 'audio', path: data.path });
-                        } else {
-                            throw new Error(data.error);
-                        }
-                    } catch (err) {
-                        alert('Erro ao fazer upload do áudio: ' + err.message);
-                        return;
-                    }
+                        } else throw new Error(data.error);
+                    } catch (err) { return alert('Erro ao upload áudio: ' + err.message); }
                 }
             }
         }
 
+        // Se a tabela de I.A tem contatos, a tabela vira a fonte principal de disparos!
+        if (aiContacts.length > 0) {
+            const enabledContacts = aiContacts.filter(c => c.enabled && c.phone);
+            if (enabledContacts.length === 0) return alert('Nenhum contato habilitado na tabela.');
+
+            if (aiEnabled) {
+                // MODO I.A ATIVO: envia a mensagem gerada individual
+                const readyToSend = enabledContacts.filter(c => c.message.trim());
+                if (readyToSend.length === 0) return alert('Nenhum contato com mensagem gerada. Gere as mensagens primeiro!');
+
+                setStatusHistory([]);
+                for (const contact of readyToSend) {
+                    try {
+                        let finalMessages = [contact.message];
+                        if (splitAiMessage) finalMessages = contact.message.split('|||').map(m => m.trim()).filter(m => m.length > 0);
+
+                        await fetch(`${API}/start`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ numbers: [contact.phone], messages: finalMessages, config })
+                        });
+                    } catch (e) { console.error('Erro:', e); }
+                }
+                return;
+            } else {
+                // MODO I.A DESATIVADO: envia a mensagem MANUAL para a lista da tabela!
+                const numberList = enabledContacts.map(c => c.phone);
+                if (!validMessages.length) return alert('Modo I.A desativado: Adicione pelo menos uma mensagem/áudio manual nas etapas abaixo!');
+
+                setStatusHistory([]);
+                try {
+                    const r = await fetch(`${API}/start`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ numbers: numberList, messages: validMessages, config })
+                    });
+                    const d = await r.json();
+                    if (!d.success) alert('Erro: ' + d.error);
+                } catch (e) { alert('Erro: ' + e.message); }
+                return;
+            }
+        }
+
+        // Modo Estritamente Manual (se não houver tabela de I.A carregada)
+        const numberList = numbers.split(/[\n,]+/).map(n => n.trim()).filter(Boolean);
         if (!numberList.length || !validMessages.length) return alert('Preencha números e adicione pelo menos uma mensagem/áudio!');
         
         setStatusHistory([]);
@@ -460,7 +488,18 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
                         <div>
                             <div className="flex items-center justify-between mb-2">
                                 <label className="text-xs font-semibold text-slate-400">Prompt da I.A</label>
-                                <span className="text-xs text-slate-600">Variáveis disponíveis:</span>
+                                <div className="flex items-center gap-2">
+                                    {savedPrompts.length > 0 && (
+                                        <select
+                                            onChange={e => e.target.value !== '' && setAiPrompt(savedPrompts[e.target.value].text)}
+                                            className="bg-slate-900 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1 outline-none"
+                                        >
+                                            <option value="">Carregar salvo...</option>
+                                            {savedPrompts.map((p, i) => <option key={i} value={i}>{p.name}</option>)}
+                                        </select>
+                                    )}
+                                    <button onClick={handleSavePrompt} className="text-[10px] text-indigo-400 border border-indigo-400/30 bg-indigo-500/10 px-2 py-1 rounded hover:bg-indigo-500/20 transition-all">Salvar Atual</button>
+                                </div>
                             </div>
                             {/* Badges de variáveis */}
                             <div className="flex flex-wrap gap-1.5 mb-2">
