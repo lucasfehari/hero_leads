@@ -816,6 +816,15 @@ app.post('/api/whatsapp/optout-config', (req, res) => {
 app.use('/api/ig', igRouter);
 igWorker.start(io);
 
+// --- Video Clips Module ---
+const clipsRouter = require('./clips/routes');
+app.use('/api/clips', clipsRouter);
+
+// --- Smart Editor Module ---
+const editorRouter = require('./clips/editor-routes');
+app.use('/api/editor', editorRouter);
+
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

@@ -1,0 +1,916 @@
+const express = require('express');
+const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const { spawn, execFile } = require('child_process');
+const { randomBytes } = require('crypto');
+const multer = require('multer');
+const clipsDb = require('./db');
+const { generateAssFile, generateAssFromSegments, generatePlaceholderAss } = require('./subtitles');
+
+// ── Dirs ──────────────────────────────────────────────────────────────────────
+const CLIPS_DIR = path.join(__dirname, '../uploads/clips');
+const THUMBS_DIR = path.join(CLIPS_DIR, 'thumbs');
+const YT_DIR = path.join(CLIPS_DIR, 'yt');
+const SUBS_DIR = path.join(CLIPS_DIR, 'subs');
+const FRAMES_DIR = path.join(CLIPS_DIR, 'frames');
+[CLIPS_DIR, THUMBS_DIR, YT_DIR, SUBS_DIR, FRAMES_DIR].forEach(d => {
+    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+});
+
+// ── Multer ────────────────────────────────────────────────────────────────────
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, CLIPS_DIR),
+    filename: (req, file, cb) => {
+        const u = Date.now() + '-' + randomBytes(4).toString('hex');
+        cb(null, u + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage, limits: { fileSize: 2000 * 1024 * 1024 } });
+
+// ── Static serving ────────────────────────────────────────────────────────────
+router.use('/files', express.static(CLIPS_DIR));
+
+// ── FFmpeg path ───────────────────────────────────────────────────────────────
+const FFMPEG = require('ffmpeg-static');
+const FFPROBE = FFMPEG.replace(/ffmpeg$/, 'ffprobe');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+function jobId() {
+    return 'job_' + Date.now() + '_' + randomBytes(3).toString('hex');
+}
+
+function getVideoDuration(filePath) {
+    return new Promise(resolve => {
+        const probe = fs.existsSync(FFPROBE) ? FFPROBE : 'ffprobe';
+        execFile(probe, [
+            '-v', 'quiet', '-print_format', 'json',
+            '-show_streams', '-show_format', filePath
+        ], (err, stdout) => {
+            if (err) return resolve({ duration: 0, width: 1920, height: 1080 });
+            try {
+                const data = JSON.parse(stdout);
+                const dur = parseFloat(data.format?.duration) || 0;
+                const vs = data.streams?.find(s => s.codec_type === 'video');
+                resolve({ duration: dur, width: vs?.width || 1920, height: vs?.height || 1080 });
+            } catch { resolve({ duration: 0, width: 1920, height: 1080 }); }
+        });
+    });
+}
+
+function extractFrame(videoPath, outputPath, atSecond = 3) {
+    return new Promise(resolve => {
+        spawn(FFMPEG, [
+            '-ss', String(Math.max(0, atSecond)),
+            '-i', videoPath,
+            '-frames:v', '1',
+            '-vf', 'scale=960:-1',
+            '-y', outputPath
+        ]).on('close', code => resolve(code === 0 && fs.existsSync(outputPath)));
+    });
+}
+
+function extractAudio(videoPath, outputPath) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn(FFMPEG, [
+            '-i', videoPath,
+            '-vn',
+            '-ar', '16000',
+            '-ac', '1',
+            '-c:a', 'pcm_s16le',
+            '-y', outputPath
+        ]);
+        let stderr = '';
+        proc.stderr.on('data', d => { stderr += d; });
+        proc.on('close', code => {
+            if (code === 0) resolve(outputPath);
+            else reject(new Error('FFmpeg audio extract failed: ' + stderr.slice(-300)));
+        });
+    });
+}
+
+function generateThumbnail(videoPath, outputPath, atSec = 2) {
+    return new Promise(resolve => {
+        spawn(FFMPEG, [
+            '-ss', String(Math.max(0, atSec)),
+            '-i', videoPath,
+            '-frames:v', '1',
+            '-vf', 'scale=540:-1',
+            '-y', outputPath
+        ]).on('close', code => resolve(code === 0));
+    });
+}
+
+async function callAI(userPrompt, systemPrompt, key, model, imageBase64 = null) {
+    if (!key || !key.trim()) throw new Error('Chave OpenRouter n\u00e3o configurada. Acesse \u2699\ufe0f Global Settings.');
+
+    const messages = [{ role: 'system', content: systemPrompt }];
+    if (imageBase64) {
+        messages.push({
+            role: 'user',
+            content: [
+                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}`, detail: 'low' } },
+                { type: 'text', text: userPrompt }
+            ]
+        });
+    } else {
+        messages.push({ role: 'user', content: userPrompt });
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: model || 'openai/gpt-4o-mini', messages, max_tokens: 2500, temperature: 0.8 })
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    return data.choices?.[0]?.message?.content?.trim() || '';
+}
+
+// ── Build FFmpeg filter_complex — circle webcam layout ───────────────────────
+function buildFFmpegArgs(opts) {
+    const { inputPath, outputPath, startSec, endSec, aspectRatio, webcam, assFile, srcW, srcH } = opts;
+    const duration = endSec - startSec;
+
+    let outW, outH;
+    if (aspectRatio === '9:16')     { outW = 1080; outH = 1920; }
+    else if (aspectRatio === '1:1') { outW = 1080; outH = 1080; }
+    else                            { outW = 1920; outH = 1080; }
+
+    const args = ['-ss', String(startSec), '-i', inputPath, '-t', String(duration)];
+    let filterParts = [];
+
+    if (webcam && webcam.position) {
+        // Resolve webcam pixel coordinates
+        let wcX, wcY, wcW, wcH;
+        if (webcam.relX != null) {
+            wcX = Math.round(webcam.relX * srcW);
+            wcY = Math.round(webcam.relY * srcH);
+            wcW = Math.round(webcam.relW * srcW);
+            wcH = Math.round(webcam.relH * srcH);
+        } else {
+            wcW = Math.round(srcW * 0.27);
+            wcH = Math.round(srcH * 0.30);
+            const pos = webcam.position;
+            wcX = pos.includes('right') ? srcW - wcW : 0;
+            wcY = pos.includes('bottom') ? srcH - wcH : 0;
+        }
+
+        // Make square crop centered on webcam region
+        const squareSide = Math.min(wcW, wcH);
+        const sqX = Math.max(0, wcX + Math.round((wcW - squareSide) / 2));
+        const sqY = Math.max(0, wcY + Math.round((wcH - squareSide) / 2));
+
+        if (aspectRatio === '9:16') {
+            // Layout: top 65% = screen, bottom 35% = dark strip + circle face
+            const mainH   = Math.round(outH * 0.65);
+            const stripH  = outH - mainH;
+            const circleD = Math.round(stripH * 0.72);  // circle = 72% of strip height
+            const borderW = Math.max(4, Math.round(circleD * 0.04));
+            const outerD  = circleD + borderW * 2;
+            const r       = circleD / 2;
+            const ro      = outerD / 2;
+
+            // ① Screen: remove webcam column, scale to top region
+            const mainSrcX = webcam.position.includes('right') ? 0 : wcW;
+            const mainSrcW = Math.max(1, srcW - wcW);
+            filterParts.push(
+                `[0:v]crop=${mainSrcW}:${srcH}:${mainSrcX}:0,` +
+                `scale=${outW}:${mainH}:force_original_aspect_ratio=decrease,` +
+                `pad=${outW}:${mainH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[main]`
+            );
+
+            // ② Face: square crop → scale → RGBA → circular alpha
+            filterParts.push(
+                `[0:v]crop=${squareSide}:${squareSide}:${sqX}:${sqY},` +
+                `scale=${circleD}:${circleD},format=rgba,` +
+                `geq='r=r(X\\,Y)':'g=g(X\\,Y)':'b=b(X\\,Y)':'a=255*lte(sqrt(pow(X-${r}\\,2)+pow(Y-${r}\\,2))\\,${r}-1)'` +
+                `[face_circle]`
+            );
+
+            // ③ White border ring
+            filterParts.push(
+                `color=white:${outerD}x${outerD},format=rgba,` +
+                `geq='r=255':'g=255':'b=255':'a=255*lte(sqrt(pow(X-${ro}\\,2)+pow(Y-${ro}\\,2))\\,${ro})'` +
+                `[ring]`
+            );
+
+            // ④ Dark strip background
+            filterParts.push(`color=0x0d1117:${outW}x${stripH}[strip_bg]`);
+
+            // ⑤ Compose ring + face on strip, centered
+            const ringX = Math.round((outW - outerD) / 2);
+            const ringY = Math.round((stripH - outerD) / 2);
+            filterParts.push(
+                `[strip_bg][ring]overlay=${ringX}:${ringY}[strip_ring]`,
+                `[strip_ring][face_circle]overlay=${ringX + borderW}:${ringY + borderW}:format=auto[strip]`
+            );
+
+            // ⑥ Stack vertically
+            filterParts.push(`[main][strip]vstack=inputs=2[outv_raw]`);
+
+        } else {
+            // 1:1 / 16:9: full scale + circle overlaid in corner
+            const circleD = Math.round(Math.min(outW, outH) * 0.22);
+            const borderW = Math.max(3, Math.round(circleD * 0.04));
+            const outerD  = circleD + borderW * 2;
+            const r       = circleD / 2;
+            const ro      = outerD / 2;
+            const pos     = webcam.position || 'bottom-right';
+            const margin  = 24;
+            const cX = pos.includes('right') ? outW - outerD - margin : margin;
+            const cY = pos.includes('bottom') ? outH - outerD - margin : margin;
+
+            filterParts.push(
+                `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH},setsar=1[bg]`,
+                `[0:v]crop=${squareSide}:${squareSide}:${sqX}:${sqY},` +
+                `scale=${circleD}:${circleD},format=rgba,` +
+                `geq='r=r(X\\,Y)':'g=g(X\\,Y)':'b=b(X\\,Y)':'a=255*lte(sqrt(pow(X-${r}\\,2)+pow(Y-${r}\\,2))\\,${r}-1)'` +
+                `[face_circle]`,
+                `color=white:${outerD}x${outerD},format=rgba,` +
+                `geq='r=255':'g=255':'b=255':'a=255*lte(sqrt(pow(X-${ro}\\,2)+pow(Y-${ro}\\,2))\\,${ro})'` +
+                `[ring]`,
+                `[bg][ring]overlay=${cX}:${cY}[with_ring]`,
+                `[with_ring][face_circle]overlay=${cX + borderW}:${cY + borderW}:format=auto[outv_raw]`
+            );
+        }
+
+    } else {
+        // No webcam — simple scale + center crop
+        filterParts.push(
+            `[0:v]scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH},setsar=1[outv_raw]`
+        );
+    }
+
+    // Burn subtitles
+    if (assFile && fs.existsSync(assFile)) {
+        const escapedAss = assFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+        filterParts.push(`[outv_raw]ass='${escapedAss}'[outv]`);
+    } else {
+        const last = filterParts[filterParts.length - 1];
+        filterParts[filterParts.length - 1] = last.replace('[outv_raw]', '[outv]');
+    }
+
+    args.push(
+        '-filter_complex', filterParts.join(';'),
+        '-map', '[outv]',
+        '-map', '0:a?',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '22',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-y', outputPath
+    );
+
+    return args;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Upload video file ─────────────────────────────────────────────────────────
+router.post('/upload', (req, res) => {
+    // Wrap multer so errors return JSON instead of HTML
+    upload.single('video')(req, res, async (err) => {
+        if (err) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).json({ error: `Arquivo muito grande. Limite: 2000MB.` });
+            }
+            return res.status(400).json({ error: err.message || 'Erro no upload.' });
+        }
+        if (!req.file) return res.status(400).json({ error: 'Nenhum vídeo enviado.' });
+        const info = await getVideoDuration(req.file.path);
+        res.json({
+            success: true,
+            path: req.file.path,
+            filename: req.file.filename,
+            originalName: req.file.originalname,
+            size: req.file.size,
+            duration: info.duration,
+            width: info.width,
+            height: info.height
+        });
+    });
+});
+
+// ── Find yt-dlp binary ────────────────────────────────────────────────────────
+function findYtDlp() {
+    const candidates = [
+        '/opt/homebrew/bin/yt-dlp',
+        '/usr/local/bin/yt-dlp',
+        '/usr/bin/yt-dlp',
+        'yt-dlp'
+    ];
+    for (const c of candidates) {
+        if (c === 'yt-dlp') return c; // fallback to PATH
+        if (fs.existsSync(c)) return c;
+    }
+    return 'yt-dlp';
+}
+const YT_DLP = findYtDlp();
+
+// ── Download from YouTube / other platforms ───────────────────────────────────
+router.post('/download-yt', async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL é obrigatória.' });
+
+    const io = req.app.get('io');
+    const jid = jobId();
+    const ts = Date.now();
+    const outputTemplate = path.join(YT_DIR, `yt_${ts}.%(ext)s`);
+
+    res.json({ success: true, jobId: jid, message: 'Download iniciado.' });
+    if (io) io.emit('clips-log', { type: 'info', message: '🎬 Baixando com yt-dlp...' });
+
+    const ytProc = spawn(YT_DLP, [
+        url,
+        '-f', 'bestvideo+bestaudio/best',
+        '--merge-output-format', 'mp4',
+        '-o', outputTemplate,
+        '--no-playlist',
+        '--newline',
+        '--no-warnings'
+    ]);
+
+    let ytTitle = 'video';
+    ytProc.stdout.on('data', d => {
+        const line = d.toString().trim();
+        if (!line) return;
+        const pm = line.match(/(\d+\.?\d*)%/);
+        if (pm && io) io.emit('clips-yt-progress', { jobId: jid, percent: parseFloat(pm[1]) });
+        const tm = line.match(/\[download\] Destination: (.+)/);
+        if (tm) ytTitle = path.basename(tm[1]).replace(/\.\w+$/, '');
+        if (io) io.emit('clips-log', { type: 'info', message: line });
+    });
+
+    ytProc.stderr.on('data', d => {
+        const msg = d.toString().trim();
+        if (msg && io) io.emit('clips-log', { type: 'warning', message: msg });
+    });
+
+    ytProc.on('close', async code => {
+        // Find what yt-dlp actually wrote (may be .mp4, .mkv, .webm…)
+        const findFile = () => {
+            const now = Date.now();
+            try {
+                const files = fs.readdirSync(YT_DIR)
+                    .filter(f => /\.(mp4|mkv|webm|mov|avi)$/i.test(f))
+                    .map(f => ({ full: path.join(YT_DIR, f), t: fs.statSync(path.join(YT_DIR, f)).mtimeMs }))
+                    .filter(({ t }) => now - t < 180000)
+                    .sort((a, b) => b.t - a.t);
+                return files.length ? files[0].full : null;
+            } catch { return null; }
+        };
+
+        let actualFile = findFile();
+
+        // Remux to mp4 if needed (fast copy, no re-encode)
+        if (actualFile && !actualFile.endsWith('.mp4')) {
+            const remuxed = actualFile.replace(/\.\w+$/, '.mp4');
+            if (io) io.emit('clips-log', { type: 'info', message: '🔄 Remuxando para MP4...' });
+            try {
+                await new Promise((resolve, reject) => {
+                    const proc = spawn(FFMPEG, ['-i', actualFile, '-c', 'copy', '-y', remuxed]);
+                    proc.on('close', c => {
+                        if (c === 0 && fs.existsSync(remuxed)) {
+                            try { fs.unlinkSync(actualFile); } catch {}
+                            resolve();
+                        } else reject(new Error('Remux falhou'));
+                    });
+                });
+                actualFile = remuxed;
+            } catch (e) {
+                if (io) io.emit('clips-log', { type: 'warning', message: `⚠️ Remux falhou: ${e.message}` });
+            }
+        }
+
+        if ((code === 0 || code === 1) && actualFile && fs.existsSync(actualFile)) {
+            const info = await getVideoDuration(actualFile);
+            if (io) {
+                io.emit('clips-yt-done', {
+                    jobId: jid, path: actualFile,
+                    filename: path.basename(actualFile),
+                    title: ytTitle, duration: info.duration,
+                    width: info.width, height: info.height, url
+                });
+                io.emit('clips-log', { type: 'success', message: `✅ Download OK! Duração: ${Math.round(info.duration)}s (${info.width}x${info.height})` });
+            }
+        } else {
+            if (io) io.emit('clips-yt-error', { jobId: jid, error: `Falha no download (código: ${code}).` });
+        }
+    });
+});
+
+
+    res.json({ success: true, jobId: jid, message: 'Download iniciado.' });
+    if (io) io.emit('clips-log', { type: 'info', message: `🎬 Baixando com yt-dlp...` });
+
+    // Download best quality with audio — no format restriction to avoid video-only
+    const ytProc = spawn(YT_DLP, [
+        url,
+        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        '--merge-output-format', 'mp4',
+        '-o', outputFile,
+        '--no-playlist',
+        '--newline',
+        '--no-warnings'
+    ]);
+
+    let ytTitle = 'video';
+    ytProc.stdout.on('data', d => {
+        const line = d.toString().trim();
+        if (!line) return;
+        const pm = line.match(/(\d+\.?\d*)%/);
+        if (pm && io) io.emit('clips-yt-progress', { jobId: jid, percent: parseFloat(pm[1]) });
+        const tm = line.match(/\[download\] Destination: (.+\.mp4)/);
+        if (tm) ytTitle = path.basename(tm[1], '.mp4');
+        if (io) io.emit('clips-log', { type: 'info', message: line });
+    });
+
+    ytProc.stderr.on('data', d => {
+        if (io) io.emit('clips-log', { type: 'warning', message: d.toString().trim() });
+    });
+
+    ytProc.on('close', async code => {
+        // yt-dlp may write to outputFile OR to a temp path — find newest mp4 in YT_DIR
+        const findOutputFile = () => {
+            if (fs.existsSync(outputFile)) return outputFile;
+            // Scan YT_DIR for the newest .mp4 that appeared in the last 2 minutes
+            try {
+                const now = Date.now();
+                const files = fs.readdirSync(YT_DIR)
+                    .filter(f => f.endsWith('.mp4'))
+                    .map(f => ({ f, t: fs.statSync(path.join(YT_DIR, f)).mtimeMs }))
+                    .filter(({ t }) => now - t < 120000) // last 2 min
+                    .sort((a, b) => b.t - a.t);
+                return files.length ? path.join(YT_DIR, files[0].f) : null;
+            } catch { return null; }
+        };
+
+        const actualFile = findOutputFile();
+        if ((code === 0 || code === 1) && actualFile) {
+            const info = await getVideoDuration(actualFile);
+            if (io) {
+                io.emit('clips-yt-done', {
+                    jobId: jid, path: actualFile,
+                    filename: path.basename(actualFile),
+                    title: ytTitle, duration: info.duration,
+                    width: info.width, height: info.height, url
+                });
+                io.emit('clips-log', { type: 'success', message: `✅ Download OK! Duração: ${Math.round(info.duration)}s (${info.width}x${info.height})` });
+            }
+        } else {
+            if (io) io.emit('clips-yt-error', { jobId: jid, error: `Falha no download (código: ${code}).` });
+        }
+    });
+});
+
+// ── Detect webcam/face via AI Vision ─────────────────────────────────────────
+router.post('/webcam-detect', async (req, res) => {
+    const { videoPath, key, model } = req.body;
+    if (!videoPath || !fs.existsSync(videoPath)) return res.status(400).json({ error: 'Arquivo não encontrado.' });
+    if (!key) return res.status(400).json({ detected: false, reason: 'Sem chave AI' });
+
+    try {
+        const framePath = path.join(FRAMES_DIR, `frame_${Date.now()}.jpg`);
+        const ok = await extractFrame(videoPath, framePath, 5);
+        if (!ok) return res.json({ detected: false, reason: 'Não foi possível extrair frame.' });
+
+        const imageBase64 = fs.readFileSync(framePath).toString('base64');
+
+        const systemPrompt = `Você é um analisador de layout de vídeos. Analise frames de vídeo e detecte webcams/câmeras de pessoa.`;
+        const userPrompt = `Analise este frame de vídeo. Existe uma janela de webcam/câmera mostrando uma pessoa (comum em tutoriais e videos de gameplay)?
+
+Retorne APENAS JSON válido:
+{
+  "hasFace": true,
+  "position": "bottom-right",
+  "confidence": 90,
+  "relX": 0.73,
+  "relY": 0.62,
+  "relW": 0.27,
+  "relH": 0.38,
+  "description": "Webcam no canto inferior direito mostrando apresentador"
+}
+
+Posições possíveis: top-left, top-right, bottom-left, bottom-right
+Se não há webcam/face: { "hasFace": false, "position": null, "confidence": 95 }
+Retorne APENAS o JSON, sem markdown.`;
+
+        const visionModel = model?.includes('gpt-4o') ? model : 'openai/gpt-4o-mini';
+        const aiResp = await callAI(userPrompt, systemPrompt, key, visionModel, imageBase64);
+
+        // Cleanup frame
+        try { fs.unlinkSync(framePath); } catch {}
+
+        const jsonMatch = aiResp.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            const result = JSON.parse(jsonMatch[0]);
+            return res.json({ success: true, ...result });
+        }
+        res.json({ detected: false, reason: 'Resposta inesperada da IA.' });
+    } catch (e) {
+        res.json({ detected: false, reason: e.message });
+    }
+});
+
+// ── Transcribe audio with Whisper ─────────────────────────────────────────────
+router.post('/transcribe', async (req, res) => {
+    const { videoPath, openaiKey, startSec = 0, endSec = 60 } = req.body;
+    if (!videoPath || !fs.existsSync(videoPath)) return res.status(400).json({ error: 'Arquivo não encontrado.' });
+    if (!openaiKey) return res.status(400).json({ error: 'Chave OpenAI necessária para transcrição.' });
+
+    try {
+        const audioPath = path.join(SUBS_DIR, `audio_${Date.now()}.wav`);
+
+        // Extract clip audio segment
+        await new Promise((resolve, reject) => {
+            const proc = spawn(FFMPEG, [
+                '-ss', String(startSec),
+                '-i', videoPath,
+                '-t', String(endSec - startSec),
+                '-vn', '-ar', '16000', '-ac', '1',
+                '-c:a', 'pcm_s16le', '-y', audioPath
+            ]);
+            let err = '';
+            proc.stderr.on('data', d => { err += d; });
+            proc.on('close', code => code === 0 ? resolve() : reject(new Error(err.slice(-200))));
+        });
+
+        // Call Whisper API
+        const FormData = require('form-data');
+        const form = new FormData();
+        form.append('file', fs.createReadStream(audioPath), { filename: 'audio.wav', contentType: 'audio/wav' });
+        form.append('model', 'whisper-1');
+        form.append('response_format', 'verbose_json');
+        form.append('timestamp_granularities[]', 'word');
+
+        const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${openaiKey}`, ...form.getHeaders() },
+            body: form
+        });
+
+        const transcriptionData = await whisperRes.json();
+        try { fs.unlinkSync(audioPath); } catch {}
+
+        if (transcriptionData.error) {
+            return res.status(400).json({ error: transcriptionData.error.message });
+        }
+
+        res.json({
+            success: true,
+            text: transcriptionData.text,
+            words: transcriptionData.words || [],
+            segments: transcriptionData.segments || []
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+
+// ── Transcribe full video — OpenAI Whisper OR Groq (free) ────────────────────
+async function transcribeVideo(videoPath, { openaiKey, groqKey }, io) {
+    const useOpenAI = !!openaiKey;
+    const useGroq   = !openaiKey && !!groqKey;
+    if (!useOpenAI && !useGroq) return null;
+
+    const provider  = useOpenAI ? 'OpenAI Whisper' : 'Groq Whisper (grátis)';
+    const apiUrl    = useOpenAI
+        ? 'https://api.openai.com/v1/audio/transcriptions'
+        : 'https://api.groq.com/openai/v1/audio/transcriptions';
+    const apiKey    = useOpenAI ? openaiKey : groqKey;
+    const modelName = useOpenAI ? 'whisper-1' : 'whisper-large-v3';
+
+    const audioPath = require('path').join(require('path').join(__dirname, '../uploads/clips/subs'), `full_audio_${Date.now()}.mp3`);
+    const SUBS_DIR_LOCAL = require('path').join(__dirname, '../uploads/clips/subs');
+
+    const audioOutPath = require('path').join(SUBS_DIR_LOCAL, `full_audio_${Date.now()}.mp3`);
+
+    try {
+        if (io) io.emit('clips-log', { type: 'info', message: `🎙️ Transcrevendo com ${provider}...` });
+
+        await new Promise((resolve, reject) => {
+            const proc = spawn(FFMPEG, [
+                '-i', videoPath, '-vn',
+                '-ar', '16000', '-ac', '1',
+                '-b:a', '32k', '-y', audioOutPath
+            ]);
+            let err = '';
+            proc.stderr.on('data', d => { err += d; });
+            proc.on('close', code => code === 0 ? resolve() : reject(new Error('FFmpeg audio: ' + err.slice(-200))));
+        });
+
+        const fileSizeMB = require('fs').statSync(audioOutPath).size / 1024 / 1024;
+        if (io) io.emit('clips-log', { type: 'info', message: `🎙️ Áudio extraído (${fileSizeMB.toFixed(1)}MB) — enviando para ${provider}...` });
+
+        const FormData = require('form-data');
+        const form = new FormData();
+        form.append('file', require('fs').createReadStream(audioOutPath), { filename: 'audio.mp3', contentType: 'audio/mpeg' });
+        form.append('model', modelName);
+        form.append('response_format', 'verbose_json');
+        form.append('timestamp_granularities[]', 'word');
+        form.append('timestamp_granularities[]', 'segment');
+        form.append('language', 'pt');
+
+        const whisperRes = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, ...form.getHeaders() },
+            body: form
+        });
+
+        try { require('fs').unlinkSync(audioOutPath); } catch {}
+
+        const data = await whisperRes.json();
+        if (data.error) {
+            if (io) io.emit('clips-log', { type: 'warning', message: `⚠️ ${provider}: ${data.error.message} — continuando sem transcrição` });
+            return null;
+        }
+
+        // Groq may put words inside segments instead of top-level
+        let words = data.words || [];
+        if (!words.length && data.segments?.length) {
+            words = data.segments.flatMap(seg => seg.words || []);
+        }
+        // Fallback: approximate word timestamps from segments
+        if (!words.length && data.segments?.length) {
+            words = data.segments.flatMap(seg => {
+                const segWords = (seg.text || '').trim().split(/\s+/).filter(Boolean);
+                if (!segWords.length) return [];
+                const dur = (seg.end - seg.start) / segWords.length;
+                return segWords.map((w, i) => ({
+                    word: w,
+                    start: seg.start + i * dur,
+                    end: seg.start + (i + 1) * dur
+                }));
+            });
+        }
+
+        if (io) io.emit('clips-log', { type: 'success', message: `✅ Transcrição concluída via ${provider}: ${words.length} palavras.` });
+        return { text: data.text || '', words, segments: data.segments || [] };
+    } catch (e) {
+        try { if (require('fs').existsSync(audioOutPath)) require('fs').unlinkSync(audioOutPath); } catch {}
+        if (io) io.emit('clips-log', { type: 'warning', message: `⚠️ Transcrição falhou (${provider}): ${e.message}` });
+        return null;
+    }
+}
+
+// ── Generate clips with AI ────────────────────────────────────────────────────
+router.post('/generate', async (req, res) => {
+    const {
+        videoPath, videoName, videoUrl,
+        prompt, clipDuration, clipCount, style, aspectRatio,
+        webcam, burnSubtitles,
+        openaiKey, groqKey,
+        key, model
+    } = req.body;
+
+    if (!videoPath || !fs.existsSync(videoPath)) return res.status(400).json({ error: 'Arquivo não encontrado.' });
+    if (!key) return res.status(400).json({ error: 'Chave OpenRouter não configurada.' });
+
+    const io = req.app.get('io');
+    const jid = jobId();
+    const numClips = Math.min(Math.max(parseInt(clipCount) || 5, 1), 20);
+    const clipLen = Math.min(Math.max(parseInt(clipDuration) || 30, 5), 180);
+    const ratio = aspectRatio || '9:16';
+    const videoLabel = videoName || path.basename(videoPath);
+
+    const videoInfo = await getVideoDuration(videoPath);
+    const totalDuration = videoInfo.duration || 600;
+
+    clipsDb.saveJob({ job_id: jid, source_path: videoPath, source_name: videoLabel, source_url: videoUrl || null, duration: totalDuration, prompt });
+    res.json({ success: true, jobId: jid, message: 'Geração iniciada.' });
+
+    // ── Step 1: Transcribe ────────────────────────────────────────────────────
+    let transcription = null;
+    if (openaiKey || groqKey) {
+        transcription = await transcribeVideo(videoPath, { openaiKey, groqKey }, io);
+    } else {
+        if (io) io.emit('clips-log', { type: 'warning', message: '⚠️ Sem chave de transcrição — configure Groq (grátis) em ⚙️ Global Settings.' });
+    }
+
+    const transcriptText = transcription?.text || '';
+    const hasTranscript  = transcriptText.length > 50;
+
+    // ── Step 2: AI moment selection ───────────────────────────────────────────
+    const styleGuides = {
+        viral:  'TikTok/Reels VIRAL: título direto e específico ao conteúdo, linguagem natural mas impactante, máximo 1 emoji.',
+        reels:  'Instagram REELS: título criativo refletindo o conteúdo real, tom engajador, hashtags do tema na legenda.',
+        shorts: 'YouTube SHORTS: título SEO com palavras-chave reais do vídeo, CTA no final da legenda.',
+        neutro: 'Profissional: título objetivo e descritivo, legenda informativa e clara.'
+    };
+
+    const systemPrompt = `Você é um editor de vídeo especialista em clips virais para redes sociais.
+
+REGRAS ABSOLUTAS:
+1. Retorne APENAS JSON válido. Zero markdown. Zero explicação. Só o JSON.
+2. Títulos e legendas DEVEM ser específicos ao conteúdo real — nunca genéricos.
+3. PROIBIDO usar: "INCRÍVEL REVELAÇÃO", "CHOCANTE", "NINGUÉM ESPERAVA", "VAI MUDAR TUDO", "IMPOSSÍVEL", "QUE QUEBRA REGRAS", "TENSÃO QUE VIRA VITÓRIA" e similares clichês de IA.
+4. O título deve soar como algo que um criador humano escreveria sobre ESTE vídeo específico.
+5. Estilo: ${styleGuides[style] || styleGuides.viral}`;
+
+    const transcriptSection = hasTranscript
+        ? `\n\nTRANSCRIÇÃO DO VÍDEO:\n"""\n${transcriptText.slice(0, 10000)}\n"""\n\nSELECIONE os ${numClips} trechos onde acontece algo mais impactante, didático ou interessante com base no que foi FALADO. Os timestamps devem corresponder exatamente ao que foi dito naquela posição da transcrição.`
+        : `\n\nSem transcrição disponível. Distribua ${numClips} clips ao longo dos ${Math.round(totalDuration)}s e crie títulos baseados no tema "${prompt || videoLabel}". Evite clichês.`;
+
+    const userPrompt = `Vídeo: "${videoLabel}"
+Duração: ${Math.round(totalDuration)}s (${(totalDuration / 60).toFixed(1)} min)
+Tema: "${prompt || 'momentos mais valiosos'}"
+Duração de cada clip: ${clipLen}s
+Quantidade: ${numClips} clips${transcriptSection}
+
+JSON exato (sem nada antes ou depois):
+{
+  "clips": [
+    {
+      "start": 15.5,
+      "end": ${15.5 + clipLen},
+      "title": "Título específico e natural baseado no conteúdo real",
+      "caption": "Legenda autêntica referenciando o ponto discutido. Inclua o aprendizado ou momento chave.",
+      "hook": "Primeira frase de abertura do clip",
+      "score": 85,
+      "whyViral": "Razão específica de engajamento"
+    }
+  ]
+}`;
+
+    if (io) io.emit('clips-log', { type: 'info', message: `🤖 I.A. analisando${hasTranscript ? ' com transcrição real' : ' via OpenRouter'}...` });
+
+    let aiClips = [];
+    try {
+        const aiResp = await callAI(userPrompt, systemPrompt, key, model || 'openai/gpt-4o-mini');
+        const jsonMatch = aiResp.match(/\{[\s\S]*\}/);
+        if (jsonMatch) aiClips = JSON.parse(jsonMatch[0]).clips || [];
+        if (io) io.emit('clips-log', { type: 'success', message: `✅ I.A. selecionou ${aiClips.length} momentos. Iniciando cortes...` });
+    } catch (e) {
+        if (io) io.emit('clips-log', { type: 'error', message: '❌ Erro na análise IA: ' + e.message });
+        clipsDb.updateJobStatus(jid, 'error');
+        return;
+    }
+
+    if (!aiClips.length) {
+        clipsDb.updateJobStatus(jid, 'error');
+        if (io) io.emit('clips-log', { type: 'error', message: '❌ Nenhum clip retornado pela IA.' });
+        return;
+    }
+
+    // ── Step 3: Process each clip ─────────────────────────────────────────────
+    for (let i = 0; i < aiClips.length; i++) {
+        const clip = aiClips[i];
+        const startSec = parseFloat(clip.start) || 0;
+        const endSec = Math.min(parseFloat(clip.end) || (startSec + clipLen), totalDuration);
+        const actualDur = endSec - startSec;
+
+        const clipFilename = `${jid}_c${i + 1}_${Date.now()}.mp4`;
+        const clipOutputPath = path.join(CLIPS_DIR, clipFilename);
+        const thumbFilename = `${jid}_t${i + 1}.jpg`;
+        const thumbOutputPath = path.join(THUMBS_DIR, thumbFilename);
+
+        if (io) {
+            io.emit('clips-log', { type: 'info', message: `✂️ Cortando ${i + 1}/${aiClips.length}: "${clip.title}" (${startSec.toFixed(1)}s → ${endSec.toFixed(1)}s)` });
+            io.emit('clips-progress', { jobId: jid, current: i, total: aiClips.length, title: clip.title });
+        }
+
+        const clipResult = clipsDb.saveClip({
+            job_id: jid, source_path: videoPath, source_name: videoLabel, source_url: videoUrl || null,
+            start_sec: startSec, end_sec: endSec, duration: actualDur,
+            title: clip.title || `Clip ${i + 1}`, caption: clip.caption || '',
+            aspect_ratio: ratio, status: 'processing', score: clip.score || 0
+        });
+        const clipId = clipResult.lastInsertRowid;
+
+        try {
+            await generateThumbnail(videoPath, thumbOutputPath, startSec + 1);
+
+            let assFilePath = null;
+            if (burnSubtitles) {
+                const assFilename = `${jid}_c${i + 1}.ass`;
+                assFilePath = path.join(SUBS_DIR, assFilename);
+
+                const clipWords = transcription?.words?.length
+                    ? transcription.words
+                        .filter(w => {
+                            const ws = parseFloat(w.start);
+                            const we = parseFloat(w.end);
+                            return ws >= (startSec - 0.5) && we <= (endSec + 0.5);
+                        })
+                        .map(w => ({
+                            word: w.word,
+                            start: Math.max(0, parseFloat(w.start) - startSec),
+                            end: Math.max(0, parseFloat(w.end) - startSec)
+                        }))
+                    : [];
+
+                if (clipWords.length > 3) {
+                    generateAssFile(clipWords, assFilePath, ratio);
+                    if (io) io.emit('clips-log', { type: 'success', message: `📝 Legendas da SUA voz: ${clipWords.length} palavras` });
+                } else {
+                    generatePlaceholderAss(0, actualDur, clip.title, clip.caption, assFilePath, ratio);
+                    if (io) io.emit('clips-log', { type: 'info', message: `📝 Clip ${i + 1}: legenda via IA (sem transcrição neste trecho)` });
+                }
+            }
+
+            const ffArgs = buildFFmpegArgs({
+                inputPath: videoPath, outputPath: clipOutputPath,
+                startSec, endSec, aspectRatio: ratio,
+                webcam: webcam || null, assFile: assFilePath,
+                srcW: videoInfo.width, srcH: videoInfo.height
+            });
+
+            await new Promise((resolve, reject) => {
+                const proc = spawn(FFMPEG, ffArgs);
+                let stderr = '';
+                proc.stderr.on('data', d => { stderr += d; });
+                proc.on('close', code => code === 0 ? resolve() : reject(new Error('FFmpeg: ' + stderr.slice(-400))));
+            });
+
+            if (assFilePath && fs.existsSync(assFilePath)) try { fs.unlinkSync(assFilePath); } catch {}
+
+            clipsDb.updateClip(clipId, { status: 'done', output_path: clipOutputPath, thumbnail: thumbOutputPath });
+
+            if (io) {
+                io.emit('clips-clip-done', {
+                    jobId: jid, clipId, index: i, total: aiClips.length,
+                    title: clip.title, caption: clip.caption,
+                    hook: clip.hook, score: clip.score, whyViral: clip.whyViral,
+                    outputUrl: `/api/clips/files/${clipFilename}`,
+                    thumbnailUrl: `/api/clips/files/thumbs/${thumbFilename}`,
+                    startSec, endSec, duration: actualDur
+                });
+                io.emit('clips-log', { type: 'success', message: `✅ Clip ${i + 1}/${aiClips.length} pronto: "${clip.title}"` });
+            }
+        } catch (err) {
+            clipsDb.updateClip(clipId, { status: 'error' });
+            if (io) io.emit('clips-log', { type: 'error', message: `❌ Erro clip ${i + 1}: ${err.message.slice(0, 200)}` });
+        }
+    }
+
+    clipsDb.updateJobStatus(jid, 'done');
+    if (io) {
+        io.emit('clips-job-done', { jobId: jid, total: aiClips.length });
+        io.emit('clips-log', { type: 'success', message: `🎉 Concluído! ${aiClips.length} clips prontos.` });
+    }
+});
+
+// ── CRUD Routes ───────────────────────────────────────────────────────────────
+router.get('/', (req, res) => {
+    try { res.json({ clips: clipsDb.listClips(req.query.job_id || null) }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/jobs', (req, res) => {
+    try { res.json({ jobs: clipsDb.listJobs() }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch('/:id', (req, res) => {
+    try {
+        const { title, caption, approved, status } = req.body;
+        clipsDb.updateClip(parseInt(req.params.id), { title, caption, approved, status });
+        res.json({ success: true, clip: clipsDb.getClip(parseInt(req.params.id)) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/:id', (req, res) => {
+    try {
+        const clip = clipsDb.getClip(parseInt(req.params.id));
+        if (clip) {
+            [clip.output_path, clip.thumbnail].forEach(f => { if (f && fs.existsSync(f)) try { fs.unlinkSync(f); } catch {} });
+        }
+        clipsDb.deleteClip(parseInt(req.params.id));
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/jobs/:jobId', (req, res) => {
+    try {
+        const clips = clipsDb.listClips(req.params.jobId);
+        clips.forEach(c => {
+            [c.output_path, c.thumbnail].forEach(f => { if (f && fs.existsSync(f)) try { fs.unlinkSync(f); } catch {} });
+        });
+        clipsDb.deleteJob(req.params.jobId);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/download/:id', (req, res) => {
+    try {
+        const clip = clipsDb.getClip(parseInt(req.params.id));
+        if (!clip || !clip.output_path || !fs.existsSync(clip.output_path)) {
+            return res.status(404).json({ error: 'Clip não encontrado.' });
+        }
+        const safeName = (clip.title || 'clip').replace(/[^a-z0-9]/gi, '_').slice(0, 50) + '.mp4';
+        res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+        res.setHeader('Content-Type', 'video/mp4');
+        fs.createReadStream(clip.output_path).pipe(res);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+module.exports = router;

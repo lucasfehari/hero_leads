@@ -53,7 +53,7 @@ class WhatsAppService {
 
         this.optOutConfig = {
             enabled: true,
-            autoReply: true,
+            autoReply: false,   // começa DESATIVADO — usuário ativa manualmente
             replyMessage: 'Tudo bem! Você foi removido da nossa lista e não receberá mais mensagens. 👋',
             keywords: [
                 'sair', 'parar', 'stop', 'cancelar', 'descadastrar',

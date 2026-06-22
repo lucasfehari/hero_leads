@@ -11,6 +11,7 @@ import HistoryPanel from './components/HistoryPanel';
 import ThreadsConfigForm from './components/ThreadsConfigForm';
 import GlobalSettingsModal from './components/GlobalSettingsModal';
 import DashboardPanel from './components/DashboardPanel';
+import VideoClipsPanel from './components/VideoClipsPanel';
 
 const socket = io('http://localhost:3000');
 
@@ -91,6 +92,24 @@ const NAV = [
       </svg>
     )
   },
+  {
+    id: 'videoclips', label: 'Cortes de Vídeo', group: 'platforms',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-4.5 h-4.5">
+        <defs>
+          <linearGradient id="scissors-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#a855f7" />
+            <stop offset="100%" stopColor="#ec4899" />
+          </linearGradient>
+        </defs>
+        <circle cx="6" cy="6" r="2.8" stroke="url(#scissors-grad)" />
+        <circle cx="6" cy="18" r="2.8" stroke="url(#scissors-grad)" />
+        <line x1="20" y1="4" x2="8.5" y2="15.5" stroke="url(#scissors-grad)" />
+        <line x1="14.5" y1="14.5" x2="20" y2="20" stroke="url(#scissors-grad)" />
+        <line x1="8.5" y1="8.5" x2="12" y2="12" stroke="url(#scissors-grad)" />
+      </svg>
+    )
+  },
 ];
 
 const THEME = {
@@ -100,6 +119,7 @@ const THEME = {
   maps: { glow: 'rgba(66,133,244,0.18)', accent: '#4285f4', label: 'Maps Studio' },
   whatsapp: { glow: 'rgba(37,211,102,0.15)', accent: '#25d366', label: 'WhatsApp Studio' },
   socialmedia: { glow: 'rgba(236,72,153,0.15)', accent: '#ec4899', label: 'Social Studio' },
+  videoclips: { glow: 'rgba(168,85,247,0.20)', accent: '#a855f7', label: 'Cortes de Vídeo ✂️' },
 };
 
 // ─── SIDEBAR NAV ITEM ─────────────────────────────────
@@ -542,6 +562,11 @@ function App() {
                   <SocialMediaPanel socket={socket} />
                 </div>
               </div>
+            )}
+
+            {/* ── VIDEO CLIPS ── */}
+            {activeTab === 'videoclips' && (
+              <VideoClipsPanel socket={socket} />
             )}
 
             {/* ── WHATSAPP ── */}

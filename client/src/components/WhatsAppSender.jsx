@@ -95,7 +95,7 @@ const WhatsAppSender = ({ prefillNumbers, prefillLeads = [] }) => {
     // Opt-Out config
     const [optOutConfig, setOptOutConfig] = useState({
         enabled: true,
-        autoReply: true,
+        autoReply: false,   // desativado por padrão
         replyMessage: 'Tudo bem! Você foi removido da nossa lista e não receberá mais mensagens. 👋',
         keywords: ['sair', 'parar', 'stop', 'cancelar', 'descadastrar', 'remover', 'não quero', 'chega', 'unsubscribe', 'bloquear', 'quit'],
     });
