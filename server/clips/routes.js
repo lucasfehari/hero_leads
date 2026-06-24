@@ -93,15 +93,30 @@ function extractAudio(videoPath, outputPath) {
     });
 }
 
-function generateThumbnail(videoPath, outputPath, atSec = 2) {
+function generateThumbnail(videoPath, outputPath, atSec = null, clipDuration = null) {
+    // Pick a smart timestamp: 15% into the clip (but at least 0.5s, avoid black frames at start)
+    let ts = atSec;
+    if (ts === null) {
+        ts = clipDuration ? Math.max(0.5, clipDuration * 0.15) : 1.5;
+    }
     return new Promise(resolve => {
-        spawn(FFMPEG, [
-            '-ss', String(Math.max(0, atSec)),
+        const proc = spawn(FFMPEG, [
+            '-ss', String(Math.max(0, ts)),
             '-i', videoPath,
             '-frames:v', '1',
             '-vf', 'scale=540:-1',
             '-y', outputPath
-        ]).on('close', code => resolve(code === 0));
+        ]);
+        proc.on('close', code => {
+            if (code === 0) return resolve(true);
+            // Fallback: try from the very beginning if timestamp was out of range
+            spawn(FFMPEG, [
+                '-i', videoPath,
+                '-frames:v', '1',
+                '-vf', 'scale=540:-1',
+                '-y', outputPath
+            ]).on('close', c2 => resolve(c2 === 0));
+        });
     });
 }
 
@@ -903,9 +918,10 @@ router.post('/generate', async (req, res) => {
         openaiKey, groqKey, huggingKey, whisperModel,
         key, model,
         // ✨ Smart processing options
-        snapWords = true,          // snap cuts to word boundaries
-        removeFillers = true,      // hide filler words in subtitles
-        silenceBuffer = 0.15,      // seconds of breathing room at cuts
+        snapWords = true,          
+        removeFillers = true,      
+        advancedEditing = false,
+        silenceBuffer = 0.15,      
     } = req.body;
 
     if (!videoPath || !fs.existsSync(videoPath)) return res.status(400).json({ error: 'Arquivo não encontrado.' });
@@ -982,7 +998,32 @@ REGRAS ABSOLUTAS:
         ? `\n\nTRANSCRIÇÃO DO VÍDEO:\n"""\n${transcriptText.slice(0, 10000)}\n"""\n\nSELECIONE os ${numClips} trechos onde acontece algo mais impactante, didático ou interessante com base no que foi FALADO. Os timestamps devem corresponder exatamente ao que foi dito naquela posição da transcrição.`
         : `\n\nSem transcrição disponível. Distribua ${numClips} clips ao longo dos ${Math.round(totalDuration)}s e crie títulos baseados no tema "${prompt || videoLabel}". Evite clichês.`;
 
-    const userPrompt = `Vídeo: "${videoLabel}"
+    const userPrompt = advancedEditing
+      ? `Vídeo: "${videoLabel}"
+Duração: ${Math.round(totalDuration)}s
+Tema: "${prompt || 'momentos mais valiosos'}"
+Quantidade: ${numClips} clips${transcriptSection}
+
+INSTRUÇÃO ESPECIAL DE EDIÇÃO AVANÇADA (STITCHING):
+Para cada clip, ao invés de escolher um bloco contínuo, você deve montar um "Frankenstein" perfeito. Escolha 2 a 4 trechos (segmentos) diferentes que, quando tocados em sequência, formam um único vídeo coeso, dinâmico e direto ao ponto. Remova silêncios longos, explicações chatas ou desvios de assunto. Junte a melhor introdução com o melhor recheio e conclusão.
+
+JSON exato (sem nada antes ou depois):
+{
+  "clips": [
+    {
+      "title": "Título específico",
+      "caption": "Legenda autêntica",
+      "hook": "Primeira frase",
+      "score": 85,
+      "whyViral": "Razão",
+      "segments": [
+        { "start": 12.5, "end": 18.0 },
+        { "start": 25.0, "end": 40.5 }
+      ]
+    }
+  ]
+}`
+      : `Vídeo: "${videoLabel}"
 Duração: ${Math.round(totalDuration)}s (${(totalDuration / 60).toFixed(1)} min)
 Tema: "${prompt || 'momentos mais valiosos'}"
 Duração de cada clip: ${clipLen}s
@@ -994,23 +1035,29 @@ JSON exato (sem nada antes ou depois):
     {
       "start": 15.5,
       "end": ${15.5 + clipLen},
-      "title": "Título específico e natural baseado no conteúdo real",
-      "caption": "Legenda autêntica referenciando o ponto discutido. Inclua o aprendizado ou momento chave.",
-      "hook": "Primeira frase de abertura do clip",
+      "title": "Título específico e natural",
+      "caption": "Legenda autêntica",
+      "hook": "Primeira frase",
       "score": 85,
-      "whyViral": "Razão específica de engajamento"
+      "whyViral": "Razão de engajamento"
     }
   ]
 }`;
 
-    if (io) io.emit('clips-log', { type: 'info', message: `🤖 I.A. analisando${hasTranscript ? ' com transcrição real' : ' via OpenRouter'}...` });
+    if (io) {
+        io.emit('clips-log', { type: 'info', message: `🤖 I.A. analisando${hasTranscript ? ' com transcrição real' : ' via OpenRouter'}...` });
+        io.emit('clips-stage', { stage: 'ai', label: 'IA selecionando momentos...' });
+    }
 
     let aiClips = [];
     try {
         const aiResp = await callAI(userPrompt, systemPrompt, cleanKey, model || 'openai/gpt-4o-mini');
         const jsonMatch = aiResp.match(/\{[\s\S]*\}/);
         if (jsonMatch) aiClips = JSON.parse(jsonMatch[0]).clips || [];
-        if (io) io.emit('clips-log', { type: 'success', message: `✅ I.A. selecionou ${aiClips.length} momentos. Iniciando cortes...` });
+        if (io) {
+            io.emit('clips-log', { type: 'success', message: `✅ I.A. selecionou ${aiClips.length} momentos. Iniciando cortes...` });
+            io.emit('clips-stage', { stage: 'cutting', label: `Cortando ${aiClips.length} clips...` });
+        }
     } catch (e) {
         if (io) io.emit('clips-log', { type: 'error', message: '❌ Erro na análise IA: ' + e.message });
         clipsDb.updateJobStatus(jid, 'error');
@@ -1026,24 +1073,108 @@ JSON exato (sem nada antes ou depois):
     // ── Step 3: Process each clip ─────────────────────────────────────────────
     for (let i = 0; i < aiClips.length; i++) {
         const clip = aiClips[i];
-        let startSec = parseFloat(clip.start) || 0;
-        let endSec = Math.min(parseFloat(clip.end) || (startSec + clipLen), totalDuration);
+        
+        let currentInputPath = videoPath;
+        let actualDur = 0;
+        let clipWords = [];
+        let renderStartSec = 0;
+        
+        // ✨ Handle Advanced Editing (Stitching segments)
+        if (advancedEditing && clip.segments && clip.segments.length > 0) {
+            if (io) io.emit('clips-log', { type: 'info', message: `✂️ Costurando ${clip.segments.length} trechos dinamicamente...` });
+            
+            let fcParts = [];
+            let currentTimeline = 0;
+            let vMaps = '';
 
-        // ✨ Snap to word boundaries — never cut mid-word
-        if (snapWords && transcription?.words?.length) {
-            const snapped = snapToWordBoundary(startSec, endSec, transcription.words, 1.5);
-            if (snapped.snapped) {
-                const startDiff = Math.abs(snapped.start - startSec).toFixed(2);
-                const endDiff   = Math.abs(snapped.end   - endSec  ).toFixed(2);
-                if (io && (snapped.startSnapped || snapped.endSnapped)) {
-                    io.emit('clips-log', { type: 'info', message: `🔧 Clip ${i+1}: corte ajustado para pausa (±${startDiff}s inicio / ±${endDiff}s fim)` });
+            for (let sIdx = 0; sIdx < clip.segments.length; sIdx++) {
+                const seg = clip.segments[sIdx];
+                let sStart = parseFloat(seg.start) || 0;
+                let sEnd   = Math.min(parseFloat(seg.end) || (sStart + clipLen), totalDuration);
+
+                // Word snapping for this segment
+                if (snapWords && transcription?.words?.length) {
+                    const snapped = snapToWordBoundary(sStart, sEnd, transcription.words, 1.5);
+                    if (snapped.snapped) {
+                        sStart = snapped.start;
+                        sEnd   = Math.min(snapped.end, totalDuration);
+                    }
                 }
-                startSec = snapped.start;
-                endSec   = Math.min(snapped.end, totalDuration);
+                
+                const sDur = sEnd - sStart;
+                
+                // Map words to new continuous stitched timeline
+                if (transcription?.words?.length) {
+                    const segWords = transcription.words.filter(w => parseFloat(w.start) >= (sStart - 0.5) && parseFloat(w.end) <= (sEnd + 0.5));
+                    for (const w of segWords) {
+                        clipWords.push({
+                            word: w.word,
+                            start: Math.max(0, parseFloat(w.start) - sStart) + currentTimeline,
+                            end: Math.max(0, parseFloat(w.end) - sStart) + currentTimeline
+                        });
+                    }
+                }
+
+                fcParts.push(`[0:v]trim=start=${sStart}:end=${sEnd},setpts=PTS-STARTPTS[v${sIdx}]`);
+                fcParts.push(`[0:a]atrim=start=${sStart}:end=${sEnd},asetpts=PTS-STARTPTS[a${sIdx}]`);
+                vMaps += `[v${sIdx}][a${sIdx}]`;
+
+                actualDur += sDur;
+                currentTimeline += sDur;
+            }
+
+            fcParts.push(`${vMaps}concat=n=${clip.segments.length}:v=1:a=1[outv][outa]`);
+            const stitchedFile = path.join(CLIPS_DIR, `stitched_${jid}_c${i}.mp4`);
+            
+            // Concat segments flawlessly using filter_complex
+            await new Promise((resolve, reject) => {
+                const proc = spawn(FFMPEG, [
+                    '-i', videoPath,
+                    '-filter_complex', fcParts.join(';'),
+                    '-map', '[outv]', '-map', '[outa]',
+                    '-c:v', 'libx264', '-preset', 'superfast', '-crf', '18',
+                    '-c:a', 'aac', '-b:a', '128k',
+                    '-y', stitchedFile
+                ]);
+                let stderr = '';
+                proc.stderr.on('data', d => { stderr += d; });
+                proc.on('close', code => code === 0 ? resolve() : reject(new Error('Falha no stitching FFmpeg: ' + stderr.slice(-200))));
+            });
+
+            currentInputPath = stitchedFile;
+            renderStartSec = 0; // stitched file starts at 0
+            
+        } else {
+            // Normal single segment fallback
+            let startSec = parseFloat(clip.start) || 0;
+            let endSec = Math.min(parseFloat(clip.end) || (startSec + clipLen), totalDuration);
+
+            if (snapWords && transcription?.words?.length) {
+                const snapped = snapToWordBoundary(startSec, endSec, transcription.words, 1.5);
+                if (snapped.snapped) {
+                    const startDiff = Math.abs(snapped.start - startSec).toFixed(2);
+                    const endDiff   = Math.abs(snapped.end   - endSec  ).toFixed(2);
+                    if (io && (snapped.startSnapped || snapped.endSnapped)) {
+                        io.emit('clips-log', { type: 'info', message: `🔧 Clip ${i+1}: corte ajustado para pausa (±${startDiff}s inicio / ±${endDiff}s fim)` });
+                    }
+                    startSec = snapped.start;
+                    endSec   = Math.min(snapped.end, totalDuration);
+                }
+            }
+
+            actualDur = endSec - startSec;
+            renderStartSec = startSec;
+            
+            if (transcription?.words?.length) {
+                clipWords = transcription.words
+                    .filter(w => parseFloat(w.start) >= (startSec - 0.5) && parseFloat(w.end) <= (endSec + 0.5))
+                    .map(w => ({
+                        word: w.word,
+                        start: Math.max(0, parseFloat(w.start) - startSec),
+                        end: Math.max(0, parseFloat(w.end) - startSec)
+                    }));
             }
         }
-
-        const actualDur = endSec - startSec;
 
         const clipFilename = `${jid}_c${i + 1}_${Date.now()}.mp4`;
         const clipOutputPath = path.join(CLIPS_DIR, clipFilename);
@@ -1051,53 +1182,43 @@ JSON exato (sem nada antes ou depois):
         const thumbOutputPath = path.join(THUMBS_DIR, thumbFilename);
 
         if (io) {
-            io.emit('clips-log', { type: 'info', message: `✂️ Cortando ${i + 1}/${aiClips.length}: "${clip.title}" (${startSec.toFixed(1)}s → ${endSec.toFixed(1)}s)` });
+            const timeInfo = advancedEditing && clip.segments 
+                ? `${clip.segments.length} trechos costurados`
+                : `${renderStartSec.toFixed(1)}s → ${(renderStartSec + actualDur).toFixed(1)}s`;
+            io.emit('clips-log', { type: 'info', message: `✂️ Cortando ${i + 1}/${aiClips.length}: "${clip.title}" (${timeInfo})` });
             io.emit('clips-progress', { jobId: jid, current: i, total: aiClips.length, title: clip.title });
+            io.emit('clips-stage', { stage: 'clip', label: `🎬 Clip ${i + 1}/${aiClips.length}: ${clip.title.slice(0, 35)}...` });
         }
 
         const clipResult = clipsDb.saveClip({
             job_id: jid, source_path: videoPath, source_name: videoLabel, source_url: videoUrl || null,
-            start_sec: startSec, end_sec: endSec, duration: actualDur,
+            start_sec: renderStartSec, end_sec: renderStartSec + actualDur, duration: actualDur,
             title: clip.title || `Clip ${i + 1}`, caption: clip.caption || '',
             aspect_ratio: ratio, status: 'processing', score: clip.score || 0
         });
         const clipId = clipResult.lastInsertRowid;
 
         try {
-            await generateThumbnail(videoPath, thumbOutputPath, startSec + 1);
+            // Smart thumbnail: 15% into clip to avoid black frames
+            await generateThumbnail(currentInputPath, thumbOutputPath, null, actualDur);
 
             let assFilePath = null;
             if (burnSubtitles) {
                 const assFilename = `${jid}_c${i + 1}.ass`;
                 assFilePath = path.join(SUBS_DIR, assFilename);
 
-                const clipWords = transcription?.words?.length
-                    ? transcription.words
-                        .filter(w => {
-                            const ws = parseFloat(w.start);
-                            const we = parseFloat(w.end);
-                            return ws >= (startSec - 0.5) && we <= (endSec + 0.5);
-                        })
-                        .map(w => ({
-                            word: w.word,
-                            start: Math.max(0, parseFloat(w.start) - startSec),
-                            end: Math.max(0, parseFloat(w.end) - startSec)
-                        }))
-                    : [];
-
                 let sStyle = subtitleStyle || {};
                 if (ratio === '9:16' && !sStyle.position) sStyle.position = 'middle-center';
 
                 if (clipWords.length > 3) {
-                    // Use Smart Captions (removes fillers + semantic breaks) when enabled
-                    if (removeFillers) {
-                        const { generateSmartCaptions } = require('./subtitles');
-                        generateSmartCaptions(clipWords, assFilePath, ratio, sStyle);
-                        if (io) io.emit('clips-log', { type: 'success', message: `📝 Legendas limpas: ${clipWords.length} palavras (muletas removidas)` });
-                    } else {
-                        generateAssFile(clipWords, assFilePath, ratio, sStyle);
-                        if (io) io.emit('clips-log', { type: 'success', message: `📝 Legendas da SUA voz: ${clipWords.length} palavras` });
-                    }
+                    // Unified engine: generateAssFile handles removeFillers via opts
+                    const wordCount = clipWords.length;
+                    if (io) io.emit('clips-stage', { stage: 'subtitles', label: `📝 Gerando legendas (${wordCount} palavras)...` });
+                    generateAssFile(clipWords, assFilePath, ratio, sStyle, { removeFillers });
+                    if (io) io.emit('clips-log', {
+                        type: 'success',
+                        message: `📝 Legendas: ${wordCount} palavras${removeFillers ? ' (muletas removidas)' : ''}`
+                    });
                 } else {
                     generatePlaceholderAss(0, actualDur, clip.title, clip.caption, assFilePath, ratio, sStyle);
                     if (io) io.emit('clips-log', { type: 'info', message: `📝 Clip ${i + 1}: legenda via IA (sem transcrição neste trecho)` });
@@ -1106,8 +1227,8 @@ JSON exato (sem nada antes ou depois):
             }
 
             const ffArgs = await buildFFmpegArgs({
-                inputPath: videoPath, outputPath: clipOutputPath,
-                startSec, endSec, aspectRatio: ratio,
+                inputPath: currentInputPath, outputPath: clipOutputPath,
+                startSec: renderStartSec, endSec: renderStartSec + actualDur, aspectRatio: ratio,
                 webcam: webcam || null, assFile: assFilePath,
                 srcW: videoInfo.width, srcH: videoInfo.height,
                 removeWebcamFromBg: removeWebcamFromBg !== false
@@ -1131,7 +1252,7 @@ JSON exato (sem nada antes ou depois):
                     hook: clip.hook, score: clip.score, whyViral: clip.whyViral,
                     outputUrl: `/api/clips/files/${clipFilename}`,
                     thumbnailUrl: `/api/clips/files/thumbs/${thumbFilename}`,
-                    startSec, endSec, duration: actualDur
+                    startSec: renderStartSec, endSec: renderStartSec + actualDur, duration: actualDur
                 });
                 io.emit('clips-log', { type: 'success', message: `✅ Clip ${i + 1}/${aiClips.length} pronto: "${clip.title}"` });
             }
@@ -1144,6 +1265,7 @@ JSON exato (sem nada antes ou depois):
     clipsDb.updateJobStatus(jid, 'done');
     if (io) {
         io.emit('clips-job-done', { jobId: jid, total: aiClips.length });
+        io.emit('clips-stage', { stage: 'done', label: `🎉 ${aiClips.length} clips prontos!` });
         io.emit('clips-log', { type: 'success', message: `🎉 Concluído! ${aiClips.length} clips prontos.` });
     }
 });

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import WebcamMaskEditor from './WebcamMaskEditor';
 import SmartEditorPanel from './SmartEditorPanel';
+import SubtitleStyleEditor from './SubtitleStyleEditor';
 
 const API = 'http://localhost:3000/api/clips';
 
@@ -96,7 +97,7 @@ function ProgressRing({ percent, size = 36, stroke = 3, color = '#a855f7' }) {
   );
 }
 
-// ── Score Badge ───────────────────────────────────────────────────────────────
+// ── Score Badge ───────────────────────────────────────────────────────────────────────
 function ScoreBadge({ score }) {
   const color = score >= 90 ? '#22c55e' : score >= 75 ? '#f59e0b' : '#94a3b8';
   return (
@@ -107,8 +108,18 @@ function ScoreBadge({ score }) {
   );
 }
 
-// ── Clip Card ─────────────────────────────────────────────────────────────────
-function ClipCard({ clip, selected, onPlay, onApprove, onDelete }) {
+// ── Rank Medal ───────────────────────────────────────────────────────────────────────
+function RankMedal({ rank }) {
+  if (rank === 1) return <span className="text-[11px]">🥇</span>;
+  if (rank === 2) return <span className="text-[11px]">🥈</span>;
+  if (rank === 3) return <span className="text-[11px]">🥉</span>;
+  return null;
+}
+
+
+
+// ── Clip Card ──────────────────────────────────────────────────────────────────────
+function ClipCard({ clip, rank, selected, onPlay, onApprove, onDelete }) {
   const isProcessing = clip.status === 'processing';
   const isDone = clip.status === 'done';
   const isError = clip.status === 'error';
@@ -125,7 +136,7 @@ function ClipCard({ clip, selected, onPlay, onApprove, onDelete }) {
       style={{ background: 'rgba(10,16,30,0.9)' }}
     >
       {/* Thumbnail */}
-      <div className="relative w-full bg-slate-900" style={{ aspectRatio: '9/16', maxHeight: 160 }}>
+      <div className="relative w-full bg-slate-900" style={{ aspectRatio: '9/16' }}>
         {clip.thumbnailUrl ? (
           <img src={`http://localhost:3000${clip.thumbnailUrl}`} alt="" className="w-full h-full object-cover"
             onError={e => { e.target.style.display='none'; }}/>
@@ -162,12 +173,29 @@ function ClipCard({ clip, selected, onPlay, onApprove, onDelete }) {
           {isApproved && <span className="text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full">✓ Aprovado</span>}
           {isError && <span className="text-[9px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full">✗ Erro</span>}
         </div>
-        {clip.score > 0 && (
+        {/* Rank medal */}
+        {rank && isDone && (
+          <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center">
+            <RankMedal rank={rank} />
+          </div>
+        )}
+        {/* Score (only when no rank shown) */}
+        {!rank && clip.score > 0 && (
           <div className="absolute top-2 right-2"><ScoreBadge score={clip.score}/></div>
         )}
         {clip.duration > 0 && (
           <div className="absolute bottom-2 right-2 text-[10px] font-bold text-white bg-black/70 px-1.5 py-0.5 rounded">
             {Math.round(clip.duration)}s
+          </div>
+        )}
+        {/* Score bar at bottom */}
+        {clip.score > 0 && isDone && (
+          <div className="absolute bottom-0 left-0 right-0 h-1" style={{ background: 'rgba(0,0,0,0.4)' }}>
+            <div className="h-full rounded-b" style={{
+              width: `${clip.score}%`,
+              background: clip.score >= 90 ? '#22c55e' : clip.score >= 75 ? '#f59e0b' : '#94a3b8',
+              transition: 'width 0.6s ease'
+            }}/>
           </div>
         )}
       </div>
@@ -215,6 +243,25 @@ function ClipCard({ clip, selected, onPlay, onApprove, onDelete }) {
   );
 }
 
+// ── Quick Prompt Chips ───────────────────────────────────────────────────────────
+const PROMPT_CHIPS = [
+  { icon: '💥', label: 'Momentos de impacto', text: 'Momentos mais impactantes e poderosos do vídeo' },
+  { icon: '💡', label: 'Dicas práticas', text: 'Dicas práticas e acionáveis que o espectador pode aplicar' },
+  { icon: '😂', label: 'Partes engraçadas', text: 'Momentos engraçados, humor e reações genuínas' },
+  { icon: '🎯', label: 'Frases virais', text: 'Frases marcantes e citáveis que podem viralizar' },
+  { icon: '❓', label: 'Perguntas e respostas', text: 'Perguntas feitas e respostas mais relevantes' },
+  { icon: '📊', label: 'Dados e stats', text: 'Estatísticas, números e fatos surpreendentes' },
+];
+
+// ── Subtitle Quick Presets ─────────────────────────────────────────────────────
+const SUBTITLE_QUICK_PRESETS = [
+  { name: '🔥 Viral', style: { position: 'middle-center', fontSize: 'large', textColor: '#FFFFFF', highlightColor: '#FFE000', outlineColor: '#000000', bold: true, bicolor: false, fadeIn: true, fontName: 'arial-black' } },
+  { name: '🥩 Bicolor', style: { position: 'middle-center', fontSize: 'large', textColor: '#FFFFFF', highlightColor: '#FFE000', biColor: '#FF6B6B', outlineColor: '#000000', bold: true, bicolor: true, fadeIn: true, fontName: 'arial-black' } },
+  { name: '🔥 Fire', style: { position: 'middle-center', fontSize: 'large', textColor: '#FFD700', highlightColor: '#FF4500', outlineColor: '#4a0000', bold: true, bicolor: false, fadeIn: true, fontName: 'impact' } },
+  { name: '🩶 Ice', style: { position: 'bottom-center', fontSize: 'large', textColor: '#E0F7FF', highlightColor: '#00FFFF', outlineColor: '#001a3a', bold: true, bicolor: false, fadeIn: true, fontName: 'arial-black' } },
+  { name: '⚪ Clean', style: { position: 'bottom-center', fontSize: 'medium', textColor: '#FFFFFF', highlightColor: '#FFFFFF', outlineColor: '#000000', bold: false, bicolor: false, fadeIn: false, fontName: 'arial-black' } },
+];
+
 // ── Main Panel ─────────────────────────────────────────────────────────────────
 export default function VideoClipsPanel({ socket }) {
   // ── addLog MUST be declared first so all handlers can use it ──────────────
@@ -223,12 +270,25 @@ export default function VideoClipsPanel({ socket }) {
     setLogs(p => [...p.slice(-300), { timestamp: new Date().toISOString(), ...entry }]);
   }, []);
 
-  // Panel mode: 'clips' = gerador normal | 'editor' = Gatilho de Edição
+  // Panel mode
   const [panelMode, setPanelMode] = useState('clips');
+  // Generation stage indicator
+  const [genStage, setGenStage] = useState(null); // { stage, label }
+  // Sort by score
+  const [sortByScore, setSortByScore] = useState(false);
 
   // Smart processing options
   const [snapWords, setSnapWords]         = useState(true);
   const [removeFillers, setRemoveFillers] = useState(true);
+  const [advancedEditing, setAdvancedEditing] = useState(false); // AI stitches multiple segments
+
+  // Subtitle style
+  const [subtitleStyle, setSubtitleStyle] = useState({
+    position: 'middle-center', fontSize: 'large',
+    textColor: '#FFFFFF', highlightColor: '#FFE000', outlineColor: '#000000',
+    bold: true, boxBackground: false, boxOpacity: 0.7
+  });
+  const [showSubtitleEditor, setShowSubtitleEditor] = useState(false);
 
   // Source
   const [sourceMode, setSourceMode] = useState('upload'); // 'upload' | 'youtube'
@@ -306,6 +366,12 @@ export default function VideoClipsPanel({ socket }) {
       setGenProgress({ current, total, title });
     });
 
+    socket.on('clips-stage', ({ stage, label }) => {
+      setGenStage({ stage, label });
+      // Clear stage after job is done
+      if (stage === 'done') setTimeout(() => setGenStage(null), 3000);
+    });
+
     socket.on('clips-clip-done', (clipData) => {
       const newClip = {
         id: clipData.clipId,
@@ -338,7 +404,7 @@ export default function VideoClipsPanel({ socket }) {
     });
 
     return () => {
-      ['clips-log','clips-yt-progress','clips-yt-done','clips-yt-error','clips-progress','clips-clip-done','clips-job-done']
+      ['clips-log','clips-yt-progress','clips-yt-done','clips-yt-error','clips-progress','clips-stage','clips-clip-done','clips-job-done']
         .forEach(e => socket.off(e));
     };
   }, [socket, addLog]);
@@ -493,6 +559,7 @@ export default function VideoClipsPanel({ socket }) {
     }
 
     setIsGenerating(true);
+    setGenStage({ stage: 'start', label: 'Iniciando...' });
     setClips([]);
     setSelectedClip(null);
     setEditingClip(null);
@@ -523,6 +590,8 @@ export default function VideoClipsPanel({ socket }) {
           // Smart processing
           snapWords,
           removeFillers,
+          advancedEditing,
+          subtitleStyle: burnSubtitles ? subtitleStyle : undefined,
         })
       });
       const data = await res.json();
@@ -861,11 +930,27 @@ export default function VideoClipsPanel({ socket }) {
             <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">
               O que cortar? <span className="text-slate-700 normal-case">(opcional)</span>
             </label>
+            {/* Quick Chips */}
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {PROMPT_CHIPS.map(chip => (
+                <button key={chip.label}
+                  onClick={() => setPrompt(chip.text)}
+                  title={chip.text}
+                  className={`text-[10px] font-medium px-2 py-1 rounded-lg border transition-all ${
+                    prompt === chip.text
+                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                      : 'bg-white/4 text-slate-500 border-white/[0.06] hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {chip.icon} {chip.label}
+                </button>
+              ))}
+            </div>
             <textarea
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               placeholder="Ex: momentos mais impactantes, falas poderosas, partes engraçadas, dicas práticas..."
-              rows={3}
+              rows={2}
               className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-3 text-white text-xs placeholder-slate-600 focus:outline-none focus:border-purple-500/50 transition-all resize-none"
             />
           </div>
@@ -931,17 +1016,59 @@ export default function VideoClipsPanel({ socket }) {
           </div>
 
           {/* Burn Subtitles toggle */}
-          <div className="flex items-center justify-between py-2 border-t border-white/5">
-            <div>
-              <p className="text-xs font-bold text-white flex items-center gap-1.5">{Icon.captions} Legendas virais</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">Word-by-word queimado no vídeo</p>
+          <div className="border-t border-white/5 pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-white flex items-center gap-1.5">{Icon.captions} Legendas virais</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">Word-by-word queimado no vídeo</p>
+              </div>
+              <button
+                onClick={() => setBurnSubtitles(p => !p)}
+                className={`relative w-10 h-5 rounded-full transition-all ${burnSubtitles ? 'bg-purple-500' : 'bg-slate-700'}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${burnSubtitles ? 'left-5' : 'left-0.5'}`}/>
+              </button>
             </div>
-            <button
-              onClick={() => setBurnSubtitles(p => !p)}
-              className={`relative w-10 h-5 rounded-full transition-all ${burnSubtitles ? 'bg-purple-500' : 'bg-slate-700'}`}
-            >
-              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${burnSubtitles ? 'left-5' : 'left-0.5'}`}/>
-            </button>
+
+          {burnSubtitles && (
+            <div className="mt-3">
+              {/* Quick subtitle preset chips — always visible */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {SUBTITLE_QUICK_PRESETS.map((p, idx) => (
+                  <button key={p.name}
+                    onClick={() => setSubtitleStyle(p.style)}
+                    className="text-[10px] font-bold px-2 py-1 rounded-lg border transition-all bg-white/4 text-slate-400 border-white/[0.06] hover:text-white hover:border-purple-500/30 hover:bg-purple-500/10"
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+              {/* Toggle for full editor */}
+              <button
+                onClick={() => setShowSubtitleEditor(p => !p)}
+                className="w-full text-left text-[10px] font-bold text-purple-400 hover:text-purple-300 flex items-center justify-between gap-2 transition-colors py-1"
+              >
+                <span>🎨 Personalizar estilo das legendas</span>
+                <span style={{ transition: 'transform 0.2s', transform: showSubtitleEditor ? 'rotate(180deg)' : 'none' }}>▼</span>
+              </button>
+
+              {showSubtitleEditor && (
+                <div className="mt-3 rounded-xl border border-purple-500/20 p-3" style={{ background: 'rgba(139,92,246,0.05)' }}>
+                  <SubtitleStyleEditor value={subtitleStyle} onChange={setSubtitleStyle} />
+                </div>
+              )}
+
+              {!showSubtitleEditor && (
+                <div className="mt-2 flex gap-1.5 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: subtitleStyle.textColor }}/>
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: subtitleStyle.highlightColor }}/>
+                    <span>{(subtitleStyle.position || 'middle-center').replace('-', ' ')} • {subtitleStyle.fontSize || 'large'}{subtitleStyle.bicolor ? ' • Bicolor' : ''}{subtitleStyle.fadeIn ? ' • Fade' : ''}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           </div>
 
           {/* ✨ Smart Processing section */}
@@ -978,10 +1105,25 @@ export default function VideoClipsPanel({ socket }) {
               </button>
             </div>
 
-            {(snapWords || removeFillers) && (
-              <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-lg p-2.5 text-[10px] text-emerald-400 space-y-0.5">
+            {/* Advanced Editing (Stitching) */}
+            <div className="flex items-center justify-between border-t border-white/5 pt-2 mt-2">
+              <div>
+                <p className="text-xs font-medium text-purple-300 flex items-center gap-1">✂️ Edição Avançada (Stitching)</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">IA escolhe tamanho, junta trechos e corta silêncios.</p>
+              </div>
+              <button
+                onClick={() => setAdvancedEditing(p => !p)}
+                className={`relative w-10 h-5 rounded-full transition-all ${advancedEditing ? 'bg-purple-500' : 'bg-slate-700'}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${advancedEditing ? 'left-5' : 'left-0.5'}`}/>
+              </button>
+            </div>
+
+            {(snapWords || removeFillers || advancedEditing) && (
+              <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-lg p-2.5 text-[10px] text-emerald-400 space-y-0.5 mt-2">
                 {snapWords && <p>✅ Cortes serão ajustados para pausas naturais da fala</p>}
                 {removeFillers && burnSubtitles && <p>✅ Legendas não vão mostrar vícios de linguagem</p>}
+                {advancedEditing && <p className="text-purple-300">⚠️ Clipe dinâmico: a IA juntará os melhores trechos, a duração do clipe pode variar.</p>}
               </div>
             )}
           </div>
@@ -1031,11 +1173,25 @@ export default function VideoClipsPanel({ socket }) {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {isGenerating && (
-              <span className="text-[10px] text-purple-400 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"/>
-                Processando...
+            {/* Stage indicator */}
+            {isGenerating && genStage && (
+              <span className="text-[10px] text-purple-300 flex items-center gap-1.5 max-w-[140px] truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse flex-shrink-0"/>
+                {genStage.label}
               </span>
+            )}
+            {doneCount > 1 && (
+              <button
+                onClick={() => setSortByScore(p => !p)}
+                title={sortByScore ? 'Ordenar por chegada' : 'Ordenar por score viral'}
+                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${
+                  sortByScore
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                    : 'bg-white/5 text-slate-400 border-white/5 hover:text-white'
+                }`}
+              >
+                {sortByScore ? '⚡ Score' : '↕ Score'}
+              </button>
             )}
             {doneCount > 0 && (
               <button
@@ -1070,7 +1226,7 @@ export default function VideoClipsPanel({ socket }) {
                 />
                 <div>
                   <p className="text-sm font-bold text-white">
-                    {genProgress.title ? `Cortando: "${genProgress.title.slice(0, 30)}..."` : 'I.A. analisando os melhores momentos...'}
+                    {genStage?.label || (genProgress.title ? `Cortando: "${genProgress.title.slice(0, 30)}..."` : 'I.A. analisando os melhores momentos...')}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {genProgress.total > 0 ? `${genProgress.current}/${genProgress.total} clips` : 'Aguarde...'}
@@ -1078,18 +1234,35 @@ export default function VideoClipsPanel({ socket }) {
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {clips.map((clip, i) => (
-                <ClipCard
-                  key={clip.id || i}
-                  clip={clip}
-                  selected={selectedClip?.id === clip.id}
-                  onPlay={setSelectedClip}
-                  onApprove={handleApprove}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
+            {(() => {
+              // Build scored + ranked list
+              const displayClips = sortByScore
+                ? [...clips].sort((a, b) => (b.score || 0) - (a.score || 0))
+                : clips;
+              // Map scores to ranks (among done clips only)
+              const doneByScore = [...clips]
+                .filter(c => c.status === 'done' && c.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .map(c => c.id);
+              return (
+                <div className="grid grid-cols-2 gap-3">
+                  {displayClips.map((clip, i) => {
+                    const rank = doneByScore.indexOf(clip.id) + 1;
+                    return (
+                      <ClipCard
+                        key={clip.id || i}
+                        clip={clip}
+                        rank={rank > 0 && rank <= 3 ? rank : null}
+                        selected={selectedClip?.id === clip.id}
+                        onPlay={setSelectedClip}
+                        onApprove={handleApprove}
+                        onDelete={handleDelete}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browze Bot — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #6366f1; --primary-dark: #4f46e5; --secondary: #8b5cf6;
+      --bg: #070712; --bg-card: #0f0f1e; --bg-card-2: #14142a;
+      --border: rgba(99,102,241,0.15); --text: #f1f5f9; --muted: #94a3b8;
+      --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+      --font: 'Inter', sans-serif; --font-d: 'Space Grotesk', sans-serif;
+    }
+    html { font-size: 15px; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Login ── */
+    #loginScreen {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    }
+    .login-box {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 48px 40px; width: 380px; text-align: center;
+    }
+    .login-box h1 { font-family: var(--font-d); font-size: 1.8rem; margin-bottom: 6px; }
+    .login-box p { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+    .input-group { text-align: left; margin-bottom: 20px; }
+    .input-group label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .input-group input {
+      width: 100%; padding: 12px 16px; background: var(--bg-card-2); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text); font-size: 14px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-group input:focus { border-color: var(--primary); }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 12px 24px; border-radius: 10px; font-weight: 600; font-size: 14px;
+      cursor: pointer; border: none; transition: all 0.2s; font-family: var(--font);
+    }
+    .btn-primary { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; width: 100%; }
+    .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn-sm { padding: 7px 16px; font-size: 12px; }
+    .btn-danger { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-success { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+    .btn-success:hover { background: rgba(34,197,94,0.25); }
+    .btn-ghost { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid rgba(255,255,255,0.1); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.1); }
+    #loginError { color: var(--red); font-size: 13px; margin-top: 12px; display: none; }
+
+    /* ── App ── */
+    #app { display: none; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 240px;
+      background: var(--bg-card); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 24px 16px;
+      z-index: 100;
+    }
+    .sidebar-logo {
+      font-family: var(--font-d); font-size: 1.1rem; font-weight: 800;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 32px; padding: 0 8px;
+    }
+    .sidebar-logo span { font-size: 1.3rem; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 12px; border-radius: 10px; cursor: pointer;
+      font-size: 14px; font-weight: 500; color: var(--muted);
+      transition: all 0.2s; margin-bottom: 4px;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .nav-item.active { background: rgba(99,102,241,0.15); color: var(--text); border: 1px solid rgba(99,102,241,0.2); }
+    .nav-icon { font-size: 1rem; width: 20px; text-align: center; }
+    .sidebar-footer { margin-top: auto; }
+    .logout-btn {
+      width: 100%; text-align: left; display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 14px;
+      color: var(--red); background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.15);
+      transition: all 0.2s;
+    }
+    .logout-btn:hover { background: rgba(239,68,68,0.15); }
+
+    .main { margin-left: 240px; padding: 32px; min-height: 100vh; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .page-title { font-family: var(--font-d); font-size: 1.6rem; font-weight: 800; margin-bottom: 4px; }
+    .page-subtitle { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+    /* ── Stats Cards ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 32px; }
+    .stat-card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+      padding: 20px; transition: border-color 0.2s;
+    }
+    .stat-card:hover { border-color: rgba(99,102,241,0.3); }
+    .stat-card__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 10px; }
+    .stat-card__value { font-family: var(--font-d); font-size: 2rem; font-weight: 800; }
+    .stat-card__sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .stat-card.today .stat-card__value { color: var(--green); }
+    .stat-card.week  .stat-card__value { color: #60a5fa; }
+
+    /* ── Table ── */
+    .table-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .search-bar {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 16px; flex: 1; max-width: 320px;
+    }
+    .search-bar input {
+      background: none; border: none; color: var(--text); font-size: 13px;
+      outline: none; width: 100%; font-family: var(--font);
+    }
+    .search-bar input::placeholder { color: var(--muted); }
+    .table-wrap {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 16px; overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead { background: rgba(99,102,241,0.07); }
+    thead th {
+      padding: 12px 16px; text-align: left; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); font-weight: 600;
+    }
+    tbody tr { border-top: 1px solid var(--border); transition: background 0.15s; }
+    tbody tr:hover { background: rgba(255,255,255,0.025); }
+    td { padding: 12px 16px; color: var(--muted); vertical-align: middle; }
+    td.name { color: var(--text); font-weight: 500; }
+    .key-cell {
+      font-family: 'Courier New', monospace; font-size: 12px; color: var(--primary);
+      background: rgba(99,102,241,0.08); padding: 4px 8px; border-radius: 6px;
+    }
+    .badge-status {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 100px;
+    }
+    .badge-status.active  { background: rgba(34,197,94,0.12); color: var(--green); }
+    .badge-status.revoked { background: rgba(239,68,68,0.12); color: var(--red); }
+    .badge-status.expired { background: rgba(234,179,8,0.12); color: var(--yellow); }
+    .actions { display: flex; gap: 6px; align-items: center; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      display: none;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 36px; width: 480px; max-width: 95vw;
+      animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .modal h2 { font-family: var(--font-d); font-size: 1.2rem; margin-bottom: 20px; }
+    .modal-close { float: right; background: none; border: none; color: var(--muted); font-size: 1.3rem; cursor: pointer; }
+    .form-row { margin-bottom: 16px; }
+    .form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .form-row input, .form-row select {
+      width: 100%; padding: 10px 14px; background: var(--bg-card-2); border: 1px solid var(--border);
+      border-radius: 9px; color: var(--text); font-size: 13px; outline: none; font-family: var(--font);
+    }
+    .form-row input:focus, .form-row select:focus { border-color: var(--primary); }
+    .form-row select option { background: var(--bg-card-2); }
+    .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+    /* ── Recent Sales ── */
+    .recent-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+    .recent-item {
+      background: var(--bg-card-2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px 16px; display: flex; align-items: center; gap: 16px;
+    }
+    .recent-item__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+    .recent-item__info { flex: 1; }
+    .recent-item__name { font-size: 13px; font-weight: 600; }
+    .recent-item__email { font-size: 11px; color: var(--muted); }
+    .recent-item__date { font-size: 11px; color: var(--muted); }
+
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 20px; font-size: 14px; display: flex; align-items: center; gap: 10px;
+      animation: slideUp 0.3s ease;
+    }
+    .toast.success { border-color: rgba(34,197,94,0.4); color: var(--green); }
+    .toast.error   { border-color: rgba(239,68,68,0.4);  color: var(--red); }
+
+    .empty-state { text-align: center; padding: 60px; color: var(--muted); }
+    .empty-state .emoji { font-size: 2.5rem; margin-bottom: 12px; }
+    .pagination { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 16px; }
+    .pagination button { background: var(--bg-card); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+    .pagination button:hover { border-color: var(--primary); }
+    .pagination button.active { background: rgba(99,102,241,0.2); border-color: var(--primary); }
+  </style>
+</head>
+<body>
+
+<!-- ── LOGIN ─────────────────────────────────── -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div style="font-size:2.5rem;margin-bottom:12px;">⚡</div>
+    <h1>Browze Bot Admin</h1>
+    <p>Painel de gerenciamento de licenças</p>
+    <div class="input-group">
+      <label>Servidor (URL)</label>
+      <input type="url" id="serverUrl" placeholder="http://localhost:4444" value="http://localhost:4444">
+    </div>
+    <div class="input-group">
+      <label>Token de Admin</label>
+      <input type="password" id="adminToken" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Entrar →</button>
+    <div id="loginError">Token inválido ou servidor offline.</div>
+  </div>
+</div>
+
+<!-- ── APP ───────────────────────────────────── -->
+<div id="app">
+  <aside class="sidebar">
+    <div class="sidebar-logo"><span>⚡</span> Browze Bot</div>
+    <nav>
+      <div class="nav-item active" id="navDashboard" onclick="showPage('dashboard')">
+        <span class="nav-icon">📊</span> Dashboard
+      </div>
+      <div class="nav-item" id="navLicenses" onclick="showPage('licenses')">
+        <span class="nav-icon">🔑</span> Licenças
+      </div>
+      <div class="nav-item" id="navCreate" onclick="openCreateModal()">
+        <span class="nav-icon">➕</span> Nova Licença
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()">🚪 Sair</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- Dashboard -->
+    <div class="page active" id="pageDashboard">
+      <div class="page-title">Dashboard</div>
+      <div class="page-subtitle" id="dashSubtitle">Carregando...</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card__label">Total</div>
+          <div class="stat-card__value" id="statTotal">—</div>
+          <div class="stat-card__sub">licenças geradas</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">Ativas</div>
+          <div class="stat-card__value" id="statActive" style="color:var(--green)">—</div>
+          <div class="stat-card__sub">em uso</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">Revogadas</div>
+          <div class="stat-card__value" id="statRevoked" style="color:var(--red)">—</div>
+          <div class="stat-card__sub">bloqueadas</div>
+        </div>
+        <div class="stat-card today">
+          <div class="stat-card__label">Hoje</div>
+          <div class="stat-card__value" id="statToday">—</div>
+          <div class="stat-card__sub">novas vendas</div>
+        </div>
+        <div class="stat-card week">
+          <div class="stat-card__label">Semana</div>
+          <div class="stat-card__value" id="statWeek">—</div>
+          <div class="stat-card__sub">últimos 7 dias</div>
+        </div>
+      </div>
+      <div style="font-family:var(--font-d);font-size:1rem;font-weight:700;margin-bottom:12px;">Vendas Recentes</div>
+      <div class="recent-grid" id="recentSalesList"></div>
+    </div>
+
+    <!-- Licenses -->
+    <div class="page" id="pageLicenses">
+      <div class="page-title">Licenças</div>
+      <div class="page-subtitle">Gerencie todas as licenças do Browze Bot</div>
+      <div class="table-header">
+        <div class="search-bar">
+          <span style="color:var(--muted)">🔍</span>
+          <input type="text" id="searchInput" placeholder="Buscar por email, nome ou chave..." oninput="debounceSearch()">
+        </div>
+        <div style="display:flex;gap:8px">
+          <select id="statusFilter" onchange="loadLicenses()" style="padding:9px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;cursor:pointer;outline:none;">
+            <option value="">Todos</option>
+            <option value="active">Ativas</option>
+            <option value="revoked">Revogadas</option>
+            <option value="expired">Expiradas</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ Nova</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadLicenses()">↻ Atualizar</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nome / Email</th>
+              <th>Chave</th>
+              <th>Plano</th>
+              <th>Status</th>
+              <th>Criado em</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="licensesTableBody">
+            <tr><td colspan="6"><div class="empty-state"><div class="emoji">⏳</div>Carregando...</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── MODAL CRIAR LICENÇA ── -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeCreateModal()">✕</button>
+    <h2>Nova Licença Manual</h2>
+    <div class="form-row">
+      <label>Email *</label>
+      <input type="email" id="newEmail" placeholder="cliente@email.com">
+    </div>
+    <div class="form-row">
+      <label>Nome</label>
+      <input type="text" id="newName" placeholder="Nome do cliente">
+    </div>
+    <div class="form-row">
+      <label>Plano</label>
+      <select id="newPlan">
+        <option value="lifetime">Vitalício</option>
+        <option value="annual">Anual</option>
+        <option value="monthly">Mensal</option>
+        <option value="trial">Trial</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Expiração (opcional)</label>
+      <input type="date" id="newExpires">
+    </div>
+    <div class="form-row">
+      <label>Anotações</label>
+      <input type="text" id="newNotes" placeholder="Ex: Cortesia, influenciador, etc.">
+    </div>
+    <div class="form-row" style="display:flex;align-items:center;gap:10px">
+      <input type="checkbox" id="sendEmail" checked style="width:auto;accent-color:var(--primary)">
+      <label for="sendEmail" style="text-transform:none;letter-spacing:0;font-size:13px;margin:0;cursor:pointer">Enviar email com a chave ao cliente</label>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeCreateModal()">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="createLicense()">Criar Licença</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let API = '';
+  let TOKEN = '';
+  let currentPage = 1;
+  let searchTimeout;
+
+  // ── Login ───────────────────────────────────────────────────────
+  async function doLogin() {
+    const url   = document.getElementById('serverUrl').value.trim().replace(/\/$/, '');
+    const token = document.getElementById('adminToken').value.trim();
+    const errEl = document.getElementById('loginError');
+    errEl.style.display = 'none';
+
+    try {
+      const res = await fetch(`${url}/admin/stats?token=${encodeURIComponent(token)}`);
+      if (!res.ok) throw new Error('Unauthorized');
+      API = url;
+      TOKEN = token;
+      localStorage.setItem('bb_api', API);
+      localStorage.setItem('bb_token', TOKEN);
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      loadDashboard();
+    } catch {
+      errEl.style.display = 'block';
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('bb_api'); localStorage.removeItem('bb_token');
+    location.reload();
+  }
+
+  // Auto-login
+  window.addEventListener('DOMContentLoaded', () => {
+    const savedApi = localStorage.getItem('bb_api');
+    const savedToken = localStorage.getItem('bb_token');
+    if (savedApi) document.getElementById('serverUrl').value = savedApi;
+    if (savedToken) document.getElementById('adminToken').value = savedToken;
+    if (savedApi && savedToken) doLogin();
+
+    document.getElementById('adminToken').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+  });
+
+  // ── Navigation ──────────────────────────────────────────────────
+  function showPage(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById(`page${page.charAt(0).toUpperCase()+page.slice(1)}`).classList.add('active');
+    document.getElementById(`nav${page.charAt(0).toUpperCase()+page.slice(1)}`).classList.add('active');
+    if (page === 'dashboard') loadDashboard();
+    if (page === 'licenses') loadLicenses();
+  }
+
+  // ── Dashboard ───────────────────────────────────────────────────
+  async function loadDashboard() {
+    const data = await apiFetch('/admin/stats');
+    if (!data) return;
+    document.getElementById('statTotal').textContent = data.total;
+    document.getElementById('statActive').textContent = data.active;
+    document.getElementById('statRevoked').textContent = data.revoked;
+    document.getElementById('statToday').textContent = data.today;
+    document.getElementById('statWeek').textContent = data.week;
+    document.getElementById('dashSubtitle').textContent = `Atualizado em ${new Date().toLocaleTimeString('pt-BR')}`;
+
+    const list = document.getElementById('recentSalesList');
+    list.innerHTML = '';
+    if (!data.recentSales?.length) {
+      list.innerHTML = '<div class="empty-state"><div class="emoji">📭</div>Nenhuma venda ainda</div>';
+      return;
+    }
+    data.recentSales.forEach(s => {
+      const date = new Date(s.created_at).toLocaleString('pt-BR');
+      list.innerHTML += `
+        <div class="recent-item">
+          <div class="recent-item__dot" style="background:${s.status==='active'?'var(--green)':'var(--red)'}"></div>
+          <div class="recent-item__info">
+            <div class="recent-item__name">${s.name || s.email}</div>
+            <div class="recent-item__email">${s.email}</div>
+          </div>
+          <div style="font-family:monospace;font-size:11px;color:var(--primary)">${s.key}</div>
+          <div class="recent-item__date">${date}</div>
+        </div>`;
+    });
+  }
+
+  // ── Licenses ────────────────────────────────────────────────────
+  async function loadLicenses() {
+    const search = document.getElementById('searchInput').value;
+    const status = document.getElementById('statusFilter').value;
+    const params = new URLSearchParams({ page: currentPage, limit: 20 });
+    if (search) params.set('search', search);
+    if (status) params.set('status', status);
+
+    const data = await apiFetch(`/admin/licenses?${params}`);
+    if (!data) return;
+
+    const tbody = document.getElementById('licensesTableBody');
+    tbody.innerHTML = '';
+
+    if (!data.licenses?.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="emoji">🔑</div>Nenhuma licença encontrada</div></td></tr>';
+      renderPagination(0, 20);
+      return;
+    }
+
+    data.licenses.forEach(l => {
+      const date = new Date(l.created_at).toLocaleDateString('pt-BR');
+      const statusMap = { active: 'Ativa', revoked: 'Revogada', expired: 'Expirada' };
+      tbody.innerHTML += `
+        <tr>
+          <td>
+            <div class="name">${l.name || '—'}</div>
+            <div style="font-size:11px;color:var(--muted)">${l.email}</div>
+          </td>
+          <td><span class="key-cell">${l.key}</span></td>
+          <td style="text-transform:capitalize">${l.plan}</td>
+          <td><span class="badge-status ${l.status}">${statusMap[l.status]||l.status}</span></td>
+          <td>${date}</td>
+          <td>
+            <div class="actions">
+              ${l.status === 'active'
+                ? `<button class="btn btn-sm btn-danger" onclick="revokeKey('${l.key}')">Revogar</button>`
+                : `<button class="btn btn-sm btn-success" onclick="activateKey('${l.key}')">Reativar</button>`
+              }
+              <button class="btn btn-sm btn-ghost" onclick="copyKey('${l.key}')">📋</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteKey('${l.key}')" title="Deletar">🗑️</button>
+            </div>
+          </td>
+        </tr>`;
+    });
+
+    renderPagination(data.total, data.limit);
+  }
+
+  function renderPagination(total, limit) {
+    const pages = Math.ceil(total / limit);
+    const el = document.getElementById('pagination');
+    el.innerHTML = '';
+    if (pages <= 1) return;
+    for (let i = 1; i <= pages; i++) {
+      el.innerHTML += `<button class="${i===currentPage?'active':''}" onclick="gotoPage(${i})">${i}</button>`;
+    }
+  }
+
+  function gotoPage(p) { currentPage = p; loadLicenses(); }
+
+  function debounceSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => { currentPage = 1; loadLicenses(); }, 400);
+  }
+
+  // ── Actions ─────────────────────────────────────────────────────
+  async function revokeKey(key) {
+    if (!confirm(`Revogar licença ${key}?`)) return;
+    const r = await apiFetch(`/admin/licenses/revoke/${key}`, 'POST');
+    if (r?.success) { showToast('Licença revogada', 'success'); loadLicenses(); loadDashboard(); }
+  }
+
+  async function activateKey(key) {
+    if (!confirm(`Reativar e resetar licença ${key}?`)) return;
+    const r = await apiFetch(`/admin/licenses/activate/${key}`, 'POST');
+    if (r?.success) { showToast('Licença reativada', 'success'); loadLicenses(); loadDashboard(); }
+  }
+
+  async function deleteKey(key) {
+    if (!confirm(`DELETAR permanentemente a licença ${key}?\nEsta ação não pode ser desfeita.`)) return;
+    const r = await apiFetch(`/admin/licenses/${key}`, 'DELETE');
+    if (r?.success) { showToast('Licença deletada', 'success'); loadLicenses(); loadDashboard(); }
+  }
+
+  function copyKey(key) {
+    navigator.clipboard.writeText(key);
+    showToast('Chave copiada!', 'success');
+  }
+
+  // ── Create Modal ────────────────────────────────────────────────
+  function openCreateModal() {
+    document.getElementById('createModal').classList.add('open');
+    document.getElementById('newEmail').focus();
+  }
+  function closeCreateModal() {
+    document.getElementById('createModal').classList.remove('open');
+    ['newEmail','newName','newNotes'].forEach(id => document.getElementById(id).value='');
+    document.getElementById('newPlan').value = 'lifetime';
+    document.getElementById('sendEmail').checked = true;
+  }
+  document.getElementById('createModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('createModal')) closeCreateModal();
+  });
+
+  async function createLicense() {
+    const email = document.getElementById('newEmail').value.trim();
+    if (!email) { showToast('Email é obrigatório', 'error'); return; }
+
+    const body = {
+      email,
+      name: document.getElementById('newName').value.trim(),
+      plan: document.getElementById('newPlan').value,
+      expires_at: document.getElementById('newExpires').value || undefined,
+      notes: document.getElementById('newNotes').value.trim(),
+      send_email: document.getElementById('sendEmail').checked,
+    };
+
+    const r = await apiFetch('/admin/licenses', 'POST', body);
+    if (r?.success) {
+      showToast(`Licença criada: ${r.key}`, 'success');
+      closeCreateModal();
+      loadLicenses();
+      loadDashboard();
+    }
+  }
+
+  // ── API Helper ──────────────────────────────────────────────────
+  async function apiFetch(path, method = 'GET', body) {
+    try {
+      const res = await fetch(`${API}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Erro na requisição', 'error'); return null; }
+      return data;
+    } catch (err) {
+      showToast('Erro de conexão com o servidor', 'error');
+      return null;
+    }
+  }
+
+  // ── Toast ────────────────────────────────────────────────────────
+  function showToast(msg, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = (type === 'success' ? '✓ ' : '✕ ') + msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3500);
+  }
+</script>
+</body>
+</html>
