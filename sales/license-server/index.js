@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -30,16 +30,8 @@ const ABACATEPAY_WEBHOOK_SECRET = process.env.ABACATEPAY_WEBHOOK_SECRET || '';
 // db é inicializado de forma assíncrona — preenchido antes do app.listen
 let db;
 
-// ─── Nodemailer ──────────────────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// ─── E-mail (Resend API) ──────────────────────────────────────────────────────
+const resend = new Resend(process.env.RESEND_API_KEY || 're_R25WhQPF_EvpCbAbQVPZ7dpgxx6aGvWDt');
 
 function planLabel(plan) {
   if (plan === 'monthly') return 'Mensal';
@@ -48,7 +40,7 @@ function planLabel(plan) {
 }
 
 async function sendLicenseEmail(email, name, licenseKey, plan = 'lifetime') {
-  if (!process.env.SMTP_USER) return;
+  // Apenas envia se tivermos uma key (o fallback acima garante que sim)
 
   const html = `
     <!DOCTYPE html>
@@ -116,12 +108,16 @@ async function sendLicenseEmail(email, name, licenseKey, plan = 'lifetime') {
     </html>
   `;
 
-  await transporter.sendMail({
-    from: `"Browze Bot" <${process.env.SMTP_USER}>`,
+  const result = await resend.emails.send({
+    from: 'Browze Bot <onboarding@resend.dev>',
     to: email,
     subject: `⚡ Sua chave de licença do Browze Bot chegou! (${planLabel(plan)})`,
     html,
   });
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
 }
 
 // ─── Helpers de Plano ─────────────────────────────────────────────────────────
