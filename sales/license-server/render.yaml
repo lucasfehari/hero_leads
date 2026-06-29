@@ -21,17 +21,7 @@ services:
         value: production
       - key: PORT
         value: 10000
-      - key: ADMIN_TOKEN
-        sync: false
-      - key: ABACATEPAY_API_KEY
-        sync: false
-      - key: ABACATEPAY_WEBHOOK_SECRET
-        sync: false
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
         value: 587
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
