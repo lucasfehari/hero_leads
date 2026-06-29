@@ -1,0 +1,37 @@
+# render.yaml — Deploy gratuito no Render.com
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: browzebot-licenses
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: sales/license-server
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /
+    # Disco persistente: SQLite fica em /var/data/licenses.db (não some entre deploys)
+    disk:
+      name: sqlite-data
+      mountPath: /var/data
+      sizeGB: 1          # 1GB grátis
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: ABACATEPAY_API_KEY
+        sync: false
+      - key: ABACATEPAY_WEBHOOK_SECRET
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

@@ -2,51 +2,33 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const Database = require('better-sqlite3');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { createDb } = require('./db-wrapper');
+
+// ─── Verificação HMAC do Abacate Pay (nativa — sem deps externas) ─────────────
+function verifyAbacateSignature(rawBody, headerSignature, secret) {
+  if (!secret || !headerSignature) return false;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(headerSignature));
+  } catch {
+    return false;
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 4444;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'admin-token-secreto';
-const CAKTO_SECRET = process.env.CAKTO_SECRET || '';
+const ABACATEPAY_WEBHOOK_SECRET = process.env.ABACATEPAY_WEBHOOK_SECRET || '';
 
-// ─── Banco de Dados ──────────────────────────────────────────────────────────
-const dbPath = path.join(__dirname, 'db', 'licenses.db');
-if (!fs.existsSync(path.join(__dirname, 'db'))) {
-  fs.mkdirSync(path.join(__dirname, 'db'));
-}
-
-const db = new Database(dbPath);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS licenses (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    key         TEXT UNIQUE NOT NULL,
-    email       TEXT NOT NULL,
-    name        TEXT,
-    plan        TEXT DEFAULT 'lifetime',
-    status      TEXT DEFAULT 'active',
-    machine_id  TEXT,
-    activations INTEGER DEFAULT 0,
-    max_devices INTEGER DEFAULT 1,
-    created_at  TEXT DEFAULT (datetime('now')),
-    expires_at  TEXT,
-    cakto_order TEXT,
-    notes       TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS activation_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    license_key TEXT NOT NULL,
-    machine_id  TEXT NOT NULL,
-    action      TEXT NOT NULL,
-    ip          TEXT,
-    created_at  TEXT DEFAULT (datetime('now'))
-  );
-`);
+// db é inicializado de forma assíncrona — preenchido antes do app.listen
+let db;
 
 // ─── Nodemailer ──────────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -59,10 +41,14 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-async function sendLicenseEmail(email, name, licenseKey) {
-  if (!process.env.SMTP_USER) return; // pula se email não configurado
+function planLabel(plan) {
+  if (plan === 'monthly') return 'Mensal';
+  if (plan === 'annual') return 'Anual';
+  return 'Vitalício';
+}
 
-  const serverUrl = process.env.SERVER_URL || 'http://localhost:4444';
+async function sendLicenseEmail(email, name, licenseKey, plan = 'lifetime') {
+  if (!process.env.SMTP_USER) return;
 
   const html = `
     <!DOCTYPE html>
@@ -81,12 +67,11 @@ async function sendLicenseEmail(email, name, licenseKey) {
         .key-box { background: #1e1e2e; border: 1px solid #6366f1; border-radius: 12px; padding: 20px; text-align: center; margin: 24px 0; }
         .key-box .label { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
         .key-box .key { font-family: 'Courier New', monospace; font-size: 20px; font-weight: 700; color: #a5b4fc; letter-spacing: 2px; word-break: break-all; }
+        .plan-badge { display: inline-block; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-bottom: 20px; }
         .steps { background: #1e1e2e; border-radius: 12px; padding: 24px; margin: 24px 0; }
         .step { display: flex; gap: 16px; margin-bottom: 16px; }
         .step-num { background: #6366f1; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
         .step-text { color: #cbd5e1; font-size: 14px; line-height: 1.6; }
-        .cta { text-align: center; margin: 32px 0; }
-        .btn { display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; text-decoration: none; padding: 14px 32px; border-radius: 10px; font-weight: 700; font-size: 15px; }
         .footer { border-top: 1px solid #1e1e2e; padding: 24px 40px; text-align: center; color: #475569; font-size: 13px; }
       </style>
     </head>
@@ -98,6 +83,7 @@ async function sendLicenseEmail(email, name, licenseKey) {
         </div>
         <div class="body">
           <h2>Olá, ${name || 'bem-vindo'}! 👋</h2>
+          <div style="text-align:center"><span class="plan-badge">Plano ${planLabel(plan)}</span></div>
           <p>Obrigado pela sua compra. Abaixo está sua chave de licença exclusiva para ativar o <strong>Browze Bot</strong>.</p>
           
           <div class="key-box">
@@ -108,7 +94,7 @@ async function sendLicenseEmail(email, name, licenseKey) {
           <div class="steps">
             <div class="step">
               <div class="step-num">1</div>
-              <div class="step-text"><strong>Baixe o Browze Bot</strong> pelo link que está na área de membros do curso.</div>
+              <div class="step-text"><strong>Baixe o Browze Bot</strong> pelo link que está na área de membros.</div>
             </div>
             <div class="step">
               <div class="step-num">2</div>
@@ -133,14 +119,45 @@ async function sendLicenseEmail(email, name, licenseKey) {
   await transporter.sendMail({
     from: `"Browze Bot" <${process.env.SMTP_USER}>`,
     to: email,
-    subject: '⚡ Sua chave de licença do Browze Bot chegou!',
+    subject: `⚡ Sua chave de licença do Browze Bot chegou! (${planLabel(plan)})`,
     html,
   });
 }
 
+// ─── Helpers de Plano ─────────────────────────────────────────────────────────
+function getExpiresAt(plan) {
+  if (plan === 'monthly') {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1);
+    return d.toISOString();
+  }
+  if (plan === 'annual') {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString();
+  }
+  return null; // lifetime = sem expiração
+}
+
+// Mapear product_id / nome do produto ao plano
+function detectPlan(payload) {
+  const productId = (payload?.product?.id || payload?.product_id || '').toString().toLowerCase();
+  const productName = (payload?.product?.name || payload?.product_name || '').toString().toLowerCase();
+  const combined = productId + ' ' + productName;
+
+  if (combined.includes('anual') || combined.includes('annual') || combined.includes('yearly')) return 'annual';
+  if (combined.includes('mensal') || combined.includes('monthly') || combined.includes('month')) return 'monthly';
+  return 'lifetime';
+}
+
 // ─── Middlewares ─────────────────────────────────────────────────────────────
 app.use(cors());
-app.use(express.json());
+
+// JSON parser global — pula /webhook/abacatepay (precisa de raw body para HMAC)
+app.use((req, res, next) => {
+  if (req.path === '/webhook/abacatepay') return next();
+  express.json()(req, res, next);
+});
 
 // Middleware de autenticação admin
 function requireAdmin(req, res, next) {
@@ -158,22 +175,49 @@ function generateLicenseKey() {
   return `BROWZE-${segment()}-${segment()}-${segment()}-${segment()}`;
 }
 
+// Lógica central de criação de licença a partir de uma venda
+async function createLicenseFromSale({ email, name, plan, orderId, notes }) {
+  // Verificar se já existe licença para este pedido
+  const existing = await db.prepare('SELECT * FROM licenses WHERE abacate_order = ?').get(orderId);
+  if (existing) {
+    return { duplicate: true, key: existing.key };
+  }
+
+  const licenseKey = generateLicenseKey();
+  const expiresAt = getExpiresAt(plan);
+
+  await db.prepare(`
+    INSERT INTO licenses (key, email, name, plan, status, abacate_order, expires_at, notes)
+    VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+  `).run(licenseKey, email, name || '', plan, orderId?.toString() || null, expiresAt, notes || null);
+
+  // Enviar email com a chave
+  try {
+    await sendLicenseEmail(email, name, licenseKey, plan);
+  } catch (e) {
+    console.warn('[EMAIL]', e.message);
+  }
+
+  console.log(`[VENDA] Nova licença (${plan}): ${licenseKey} → ${email}`);
+  return { duplicate: false, key: licenseKey };
+}
+
 // ─── ROTAS PÚBLICAS ───────────────────────────────────────────────────────────
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'Browze Bot License Server', version: '1.0.0' });
+  res.json({ status: 'ok', service: 'Browze Bot License Server', version: '2.0.0' });
 });
 
 // Validar licença (chamado pelo app Electron)
-app.post('/validate', (req, res) => {
+app.post('/validate', express.json(), async (req, res) => {
   const { key, machine_id } = req.body;
 
   if (!key || !machine_id) {
     return res.status(400).json({ valid: false, error: 'Chave e machine_id são obrigatórios' });
   }
 
-  const license = db.prepare('SELECT * FROM licenses WHERE key = ?').get(key);
+  const license = await db.prepare('SELECT * FROM licenses WHERE key = ?').get(key);
 
   if (!license) {
     return res.json({ valid: false, error: 'Licença não encontrada' });
@@ -185,20 +229,19 @@ app.post('/validate', (req, res) => {
 
   // Verificar expiração
   if (license.expires_at && new Date(license.expires_at) < new Date()) {
-    db.prepare("UPDATE licenses SET status = 'expired' WHERE key = ?").run(key);
-    return res.json({ valid: false, error: 'Licença expirada' });
+    await db.prepare("UPDATE licenses SET status = 'expired' WHERE key = ?").run(key);
+    return res.json({ valid: false, error: 'Licença expirada. Renove seu plano em browzebot.com.br' });
   }
 
   // Verificar machine_id
   if (license.machine_id && license.machine_id !== machine_id) {
-    // Já ativada em outro dispositivo
-    const activationCount = db.prepare(
+    const activationCount = await db.prepare(
       "SELECT COUNT(*) as count FROM activation_log WHERE license_key = ? AND action = 'activate'"
     ).get(key);
 
-    if (activationCount.count >= license.max_devices) {
-      // Logar tentativa
-      db.prepare(
+    const maxDevices = license.max_devices || 1;
+    if (activationCount.count >= maxDevices) {
+      await db.prepare(
         "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'blocked', ?)"
       ).run(key, machine_id, req.ip);
 
@@ -208,11 +251,10 @@ app.post('/validate', (req, res) => {
 
   // Atualizar machine_id se for primeira ativação
   if (!license.machine_id) {
-    db.prepare('UPDATE licenses SET machine_id = ?, activations = activations + 1 WHERE key = ?').run(machine_id, key);
-    db.prepare("INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'activate', ?)").run(key, machine_id, req.ip);
+    await db.prepare('UPDATE licenses SET machine_id = ?, activations = activations + 1 WHERE key = ?').run(machine_id, key);
+    await db.prepare("INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'activate', ?)").run(key, machine_id, req.ip);
   } else {
-    // Logar uso normal
-    db.prepare("INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'use', ?)").run(key, machine_id, req.ip);
+    await db.prepare("INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'use', ?)").run(key, machine_id, req.ip);
   }
 
   res.json({
@@ -224,51 +266,48 @@ app.post('/validate', (req, res) => {
   });
 });
 
-// ─── WEBHOOK CAKTO ────────────────────────────────────────────────────────────
-app.post('/webhook/cakto', async (req, res) => {
+// ─── WEBHOOK ABACATE PAY ──────────────────────────────────────────────────────
+app.post('/webhook/abacatepay', express.raw({ type: '*/*' }), async (req, res) => {
   try {
-    // Verificar assinatura do webhook (se Cakto enviar)
-    // const signature = req.headers['x-cakto-signature'];
-    // TODO: implementar verificação quando Cakto fornecer o método
+    const signature = req.headers['x-webhook-secret'] || req.headers['x-abacatepay-signature'] || '';
+    if (ABACATEPAY_WEBHOOK_SECRET) {
+      const valid = verifyAbacateSignature(req.body, signature, ABACATEPAY_WEBHOOK_SECRET);
+      if (!valid) {
+        console.warn('[WEBHOOK] Assinatura inválida');
+        return res.status(401).json({ error: 'Assinatura inválida' });
+      }
+    }
 
-    const payload = req.body;
+    const payload = JSON.parse(req.body.toString('utf8'));
+    const event = (payload?.event || payload?.type || '').toLowerCase();
 
-    // Cakto envia diferentes eventos — só processar compra aprovada
-    const event = payload.event || payload.type;
-    if (!['purchase.approved', 'order.paid', 'sale.approved'].includes(event)) {
+    const isPayment = [
+      'billing.paid', 'billing_paid',
+      'purchase.approved', 'order.paid', 'sale.approved',
+    ].includes(event) || event.includes('paid') || event.includes('approved') || event === '';
+
+    if (!isPayment) {
       return res.json({ received: true, action: 'ignored', event });
     }
 
-    const customer = payload.customer || payload.buyer || {};
-    const email = customer.email || payload.email;
-    const name = customer.name || payload.name || email;
-    const orderId = payload.order_id || payload.id || uuidv4();
-    const productId = payload.product_id || payload.product?.id;
+    const billing = payload?.billing || payload;
+    const customer = billing?.customer || payload?.customer || payload?.buyer || {};
+    const email = customer.email || billing?.email || payload?.email;
+    const name = customer.name || billing?.name || payload?.name || email;
+    const orderId = billing?.id || payload?.order_id || payload?.id || uuidv4();
+    const plan = detectPlan(payload);
 
     if (!email) {
-      return res.status(400).json({ error: 'Email do comprador não encontrado no webhook' });
+      return res.status(400).json({ error: 'Email do comprador não encontrado' });
     }
 
-    // Verificar se já tem licença para este pedido
-    const existing = db.prepare('SELECT * FROM licenses WHERE cakto_order = ?').get(orderId);
-    if (existing) {
-      return res.json({ received: true, action: 'duplicate', key: existing.key });
-    }
-
-    // Gerar licença
-    const licenseKey = generateLicenseKey();
-
-    db.prepare(`
-      INSERT INTO licenses (key, email, name, plan, status, cakto_order)
-      VALUES (?, ?, ?, 'lifetime', 'active', ?)
-    `).run(licenseKey, email, name, orderId.toString());
-
-    // Enviar email com a chave
-    await sendLicenseEmail(email, name, licenseKey);
-
-    console.log(`[VENDA] Nova licença gerada: ${licenseKey} → ${email}`);
-
-    res.json({ received: true, action: 'license_created', key: licenseKey });
+    const result = await createLicenseFromSale({ email, name, plan, orderId });
+    res.json({
+      received: true,
+      action: result.duplicate ? 'duplicate' : 'license_created',
+      key: result.key,
+      plan,
+    });
   } catch (err) {
     console.error('[WEBHOOK ERROR]', err);
     res.status(500).json({ error: err.message });
@@ -278,7 +317,7 @@ app.post('/webhook/cakto', async (req, res) => {
 // ─── ROTAS ADMIN ─────────────────────────────────────────────────────────────
 
 // Listar todas as licenças
-app.get('/admin/licenses', requireAdmin, (req, res) => {
+app.get('/admin/licenses', requireAdmin, async (req, res) => {
   const { status, search, page = 1, limit = 50 } = req.query;
   let query = 'SELECT * FROM licenses';
   const params = [];
@@ -291,8 +330,9 @@ app.get('/admin/licenses', requireAdmin, (req, res) => {
   query += ' ORDER BY created_at DESC';
   query += ` LIMIT ${parseInt(limit)} OFFSET ${(parseInt(page) - 1) * parseInt(limit)}`;
 
-  const licenses = db.prepare(query).all(...params);
-  const total = db.prepare('SELECT COUNT(*) as count FROM licenses').get().count;
+  const licenses = await db.prepare(query).all(...params);
+  const totalRes = await db.prepare('SELECT COUNT(*) as count FROM licenses').get();
+  const total = totalRes ? totalRes.count : 0;
 
   res.json({ licenses, total, page: parseInt(page), limit: parseInt(limit) });
 });
@@ -304,74 +344,151 @@ app.post('/admin/licenses', requireAdmin, async (req, res) => {
   if (!email) return res.status(400).json({ error: 'Email obrigatório' });
 
   const licenseKey = generateLicenseKey();
+  const expiresAt = expires_at || getExpiresAt(plan);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO licenses (key, email, name, plan, status, max_devices, expires_at, notes)
     VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
-  `).run(licenseKey, email, name || '', plan, max_devices, expires_at || null, notes || null);
+  `).run(licenseKey, email, name || '', plan, max_devices, expiresAt, notes || null);
 
   if (send_email) {
-    try { await sendLicenseEmail(email, name, licenseKey); } catch (e) { console.warn('Email não enviado:', e.message); }
+    try { await sendLicenseEmail(email, name, licenseKey, plan); } catch (e) { console.warn('Email não enviado:', e.message); }
   }
 
-  res.json({ success: true, key: licenseKey });
+  res.json({ success: true, key: licenseKey, plan, expires_at: expiresAt });
 });
 
 // Revogar licença
-app.post('/admin/licenses/revoke/:key', requireAdmin, (req, res) => {
+app.post('/admin/licenses/revoke/:key', requireAdmin, async (req, res) => {
   const { key } = req.params;
-  const result = db.prepare("UPDATE licenses SET status = 'revoked' WHERE key = ?").run(key);
-  if (result.changes === 0) return res.status(404).json({ error: 'Licença não encontrada' });
+  const result = await db.prepare("UPDATE licenses SET status = 'revoked' WHERE key = ?").run(key);
   res.json({ success: true, message: `Licença ${key} revogada` });
 });
 
 // Reativar licença
-app.post('/admin/licenses/activate/:key', requireAdmin, (req, res) => {
+app.post('/admin/licenses/activate/:key', requireAdmin, async (req, res) => {
   const { key } = req.params;
-  const result = db.prepare("UPDATE licenses SET status = 'active', machine_id = NULL, activations = 0 WHERE key = ?").run(key);
-  if (result.changes === 0) return res.status(404).json({ error: 'Licença não encontrada' });
+  await db.prepare("UPDATE licenses SET status = 'active', machine_id = NULL, activations = 0 WHERE key = ?").run(key);
   res.json({ success: true, message: `Licença ${key} reativada e resetada` });
 });
 
-// Deletar licença
-app.delete('/admin/licenses/:key', requireAdmin, (req, res) => {
+// Renovar plano (atualiza expires_at)
+app.post('/admin/licenses/renew/:key', requireAdmin, async (req, res) => {
   const { key } = req.params;
-  db.prepare('DELETE FROM activation_log WHERE license_key = ?').run(key);
-  const result = db.prepare('DELETE FROM licenses WHERE key = ?').run(key);
-  if (result.changes === 0) return res.status(404).json({ error: 'Licença não encontrada' });
+  const { plan } = req.body;
+  const license = await db.prepare('SELECT * FROM licenses WHERE key = ?').get(key);
+  if (!license) return res.status(404).json({ error: 'Licença não encontrada' });
+
+  const newPlan = plan || license.plan;
+  const expiresAt = getExpiresAt(newPlan);
+
+  await db.prepare("UPDATE licenses SET plan = ?, expires_at = ?, status = 'active' WHERE key = ?").run(newPlan, expiresAt, key);
+  res.json({ success: true, plan: newPlan, expires_at: expiresAt });
+});
+
+// Deletar licença
+app.delete('/admin/licenses/:key', requireAdmin, async (req, res) => {
+  const { key } = req.params;
+  await db.prepare('DELETE FROM activation_log WHERE license_key = ?').run(key);
+  await db.prepare('DELETE FROM licenses WHERE key = ?').run(key);
   res.json({ success: true });
 });
 
 // Estatísticas do dashboard
-app.get('/admin/stats', requireAdmin, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM licenses').get().count;
-  const active = db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'active'").get().count;
-  const revoked = db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'revoked'").get().count;
-  const today = db.prepare("SELECT COUNT(*) as count FROM licenses WHERE date(created_at) = date('now')").get().count;
-  const week = db.prepare("SELECT COUNT(*) as count FROM licenses WHERE created_at >= datetime('now', '-7 days')").get().count;
+app.get('/admin/stats', requireAdmin, async (req, res) => {
+  const tRes = await db.prepare('SELECT COUNT(*) as count FROM licenses').get();
+  const total = tRes ? tRes.count : 0;
+  
+  const aRes = await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'active'").get();
+  const active = aRes ? aRes.count : 0;
 
-  const recentSales = db.prepare(
-    "SELECT key, email, name, plan, status, created_at FROM licenses ORDER BY created_at DESC LIMIT 10"
+  const rRes = await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'revoked'").get();
+  const revoked = rRes ? rRes.count : 0;
+
+  const eRes = await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'expired'").get();
+  const expired = eRes ? eRes.count : 0;
+
+  const tdRes = await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE date(created_at) = date('now')").get();
+  const today = tdRes ? tdRes.count : 0;
+
+  const wRes = await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE created_at >= datetime('now', '-7 days')").get();
+  const week = wRes ? wRes.count : 0;
+
+  const byPlan = await db.prepare("SELECT plan, COUNT(*) as count FROM licenses GROUP BY plan").all();
+  const recentSales = await db.prepare(
+    "SELECT key, email, name, plan, status, expires_at, created_at FROM licenses ORDER BY created_at DESC LIMIT 10"
   ).all();
 
-  res.json({ total, active, revoked, today, week, recentSales });
+  res.json({ total, active, revoked, expired, today, week, byPlan, recentSales });
 });
 
 // Log de ativações
-app.get('/admin/logs', requireAdmin, (req, res) => {
+app.get('/admin/logs', requireAdmin, async (req, res) => {
   const { key } = req.query;
   let query = 'SELECT * FROM activation_log';
   const params = [];
   if (key) { query += ' WHERE license_key = ?'; params.push(key); }
   query += ' ORDER BY created_at DESC LIMIT 100';
-  const logs = db.prepare(query).all(...params);
+  const logs = await db.prepare(query).all(...params);
   res.json({ logs });
 });
 
-// ─── START ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n⚡ Browze Bot License Server rodando na porta ${PORT}`);
-  console.log(`   Admin Panel: http://localhost:${PORT}/admin/stats`);
-  console.log(`   Validate:    POST http://localhost:${PORT}/validate`);
-  console.log(`   Webhook:     POST http://localhost:${PORT}/webhook/cakto\n`);
+// ─── Simular venda manualmente (para testes) ──────────────────────────────────
+app.post('/admin/simulate-sale', requireAdmin, async (req, res) => {
+  const { email, name, plan = 'monthly' } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email obrigatório' });
+
+  const result = await createLicenseFromSale({
+    email,
+    name: name || email,
+    plan,
+    orderId: `SIMULADO-${Date.now()}`,
+    notes: 'Venda simulada manualmente',
+  });
+
+  res.json({ success: true, ...result, plan });
+});
+
+// ─── START (async: aguarda DB antes de ouvir) ────────────────────────────────
+async function init() {
+  db = await createDb();
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS licenses (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      key         TEXT UNIQUE NOT NULL,
+      email       TEXT NOT NULL,
+      name        TEXT,
+      plan        TEXT DEFAULT 'lifetime',
+      status      TEXT DEFAULT 'active',
+      machine_id  TEXT,
+      activations INTEGER DEFAULT 0,
+      max_devices INTEGER DEFAULT 1,
+      created_at  TEXT DEFAULT (datetime('now')),
+      expires_at  TEXT,
+      abacate_order TEXT,
+      notes       TEXT
+    );
+    CREATE TABLE IF NOT EXISTS activation_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      license_key TEXT NOT NULL,
+      machine_id  TEXT NOT NULL,
+      action      TEXT NOT NULL,
+      ip          TEXT,
+      created_at  TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  try {
+    await db.exec(`ALTER TABLE licenses RENAME COLUMN cakto_order TO abacate_order`);
+  } catch (_) {}
+
+  app.listen(PORT, () => {
+    console.log(`\n⚡ Browze Bot License Server v2.0 rodando na porta ${PORT}`);
+  });
+}
+
+init().catch(err => {
+  console.error('Erro fatal ao iniciar o servidor:', err);
+  process.exit(1);
 });
