@@ -109,7 +109,7 @@ async function sendLicenseEmail(email, name, licenseKey, plan = 'lifetime') {
   `;
 
   const result = await resend.emails.send({
-    from: 'Browze Bot <onboarding@resend.dev>',
+    from: 'Browze Bot <suporte@app.feharistudio.com.br>',
     to: email,
     subject: `⚡ Sua chave de licença do Browze Bot chegou! (${planLabel(plan)})`,
     html,
