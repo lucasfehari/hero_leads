@@ -3,7 +3,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const db = new Database(path.join(__dirname, 'db', 'instagram_sessions.db'));
+const db = new Database(path.join(require('os').homedir(), '.browzebot', 'db', 'instagram_sessions.db'));
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -13,7 +13,7 @@ db.exec(`
     )
 `);
 
-const profilesDir = path.join(__dirname, 'profiles');
+const profilesDir = path.join(require('os').homedir(), '.browzebot', 'profiles');
 
 if (!fs.existsSync(profilesDir)) {
     console.log('Pasta server/profiles não encontrada — nada a fazer.');

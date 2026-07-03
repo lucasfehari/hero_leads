@@ -625,7 +625,7 @@ async function publishPost(post) {
         }
 
         if (!captionClicked) {
-            await page.screenshot({ path: path.join(__dirname, 'ig_worker_debug_precaption.png') });
+            await page.screenshot({ path: path.join(require('os').homedir(), '.browzebot', 'ig_worker_debug_precaption.png') });
             log('Caption box not found after waiting — check ig_worker_debug_precaption.png', 'warning');
         } else {
             log('Caption box found and focused.');
@@ -735,7 +735,7 @@ async function publishPost(post) {
                 }
             } catch (err) {
                 log(`Error injecting caption: ${err.message}`, 'error');
-                await page.screenshot({ path: path.join(__dirname, 'ig_worker_debug_caption_error.png') }).catch(() => {});
+                await page.screenshot({ path: path.join(require('os').homedir(), '.browzebot', 'ig_worker_debug_caption_error.png') }).catch(() => {});
             }
 
             await randomDelay(3000, 4000); // Descanso antes de prosseguir
@@ -750,7 +750,7 @@ async function publishPost(post) {
         log('Clicking Publish...');
         const shared = await clickPublish();
         if (!shared) {
-            await page.screenshot({ path: path.join(__dirname, 'ig_worker_debug_publish.png') });
+            await page.screenshot({ path: path.join(require('os').homedir(), '.browzebot', 'ig_worker_debug_publish.png') });
             return fail(post, log, 'Could not find "Share" button. Check ig_worker_debug_publish.png');
         }
         await randomDelay(3000, 5000); // Takes time for the final dialog to render

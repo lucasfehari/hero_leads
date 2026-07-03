@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const IG_DIR = path.join(__dirname);
+const IG_DIR = path.join(require('os').homedir(), '.browzebot');
 const COOKIES_DIR = path.join(IG_DIR, 'cookies');
 
 if (!fs.existsSync(COOKIES_DIR)) fs.mkdirSync(COOKIES_DIR, { recursive: true });

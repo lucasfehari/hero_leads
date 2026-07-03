@@ -4,8 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
-const SESSIONS_DIR = path.join(__dirname, '../../whatsapp_sessions');
-const DB_PATH = path.join(__dirname, '../../whatsapp_sessions/wa_sessions_meta.db');
+const SESSIONS_DIR = path.join(require('os').homedir(), '.browzebot', '../../whatsapp_sessions');
+const DB_PATH = path.join(require('os').homedir(), '.browzebot', '../../whatsapp_sessions/wa_sessions_meta.db');
 
 // ── SQLite metadata for WA sessions ──────────────────────────────────────────
 // We can't store the FULL session (it's Chromium state) but we CAN store display metadata
@@ -63,7 +63,46 @@ class WhatsAppService {
         };
 
         if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-        this.createClient('default');
+        
+        // Inicializa a fila vazia
+        this.queue = new MessageQueue(
+            () => this.client,
+            () => this.currentSession
+        );
+
+        this.queue.onStatus((status) => {
+            if (this.io) this.io.emit('wa-queue-status', status);
+        });
+
+        // O cliente NÃO inicia mais automaticamente no boot
+    }
+
+    async powerOn() {
+        if (!this.client && !this.isConnected) {
+            this.io.emit('wa-status', { status: 'connecting' });
+            await this.createClient(this.currentSession || 'default');
+        }
+        return { success: true };
+    }
+
+    async powerOff() {
+        if (this.client) {
+            try { 
+                if (this.client.pupBrowser) {
+                    try {
+                        const proc = this.client.pupBrowser.process();
+                        if (proc) proc.kill('SIGKILL');
+                    } catch (e) {}
+                }
+                await this.client.destroy(); 
+            } catch (e) { /* ignore */ }
+            
+            this.client = null;
+            this.isConnected = false;
+            this.currentQr = null;
+            this.io.emit('wa-status', { status: 'power_off' });
+        }
+        return { success: true };
     }
 
     async createClient(sessionName) {
@@ -281,6 +320,7 @@ class WhatsAppService {
         const meta = getMeta(this.currentSession);
         return {
             connected: this.isConnected,
+            isPoweredOn: !!this.client,
             session: this.currentSession,
             phone: meta?.phone || null,
             label: meta?.label || this.currentSession,

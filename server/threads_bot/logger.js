@@ -10,8 +10,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const SCREENSHOTS_DIR = path.join(__dirname, 'debug_screenshots');
-const LOGS_DIR = path.join(__dirname, 'debug_logs');
+const SCREENSHOTS_DIR = path.join(require('os').homedir(), '.browzebot', 'debug_screenshots');
+const LOGS_DIR = path.join(require('os').homedir(), '.browzebot', 'debug_logs');
 
 class Logger {
     /**

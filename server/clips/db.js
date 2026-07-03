@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const CLIPS_DB_DIR = path.join(__dirname, '../../db');
+const CLIPS_DB_DIR = path.join(require('os').homedir(), '.browzebot', '../../db');
 if (!fs.existsSync(CLIPS_DB_DIR)) fs.mkdirSync(CLIPS_DB_DIR, { recursive: true });
 
 const db = new Database(path.join(CLIPS_DB_DIR, 'clips.db'));

@@ -7,9 +7,10 @@ const { randomBytes } = require('crypto');
 const multer = require('multer');
 const clipsDb = require('./db');
 const { generateAssFile, generateAssFromSegments, generatePlaceholderAss } = require('./subtitles');
+const { runRetentionPipeline } = require('./retention');
 
 // ── Dirs ──────────────────────────────────────────────────────────────────────
-const CLIPS_DIR = path.join(__dirname, '../uploads/clips');
+const CLIPS_DIR = path.join(require('os').homedir(), '.browzebot', '../uploads/clips');
 const THUMBS_DIR = path.join(CLIPS_DIR, 'thumbs');
 const YT_DIR = path.join(CLIPS_DIR, 'yt');
 const SUBS_DIR = path.join(CLIPS_DIR, 'subs');
@@ -238,7 +239,7 @@ async function buildFFmpegArgs(opts) {
         const sqY = Math.max(0, wcY + Math.round((wcH - squareSide) / 2));
 
         // Generate masks for alphamerge (super fast instead of geq per frame)
-        const maskDir = path.join(__dirname, '../../uploads/frames');
+        const maskDir = path.join(require('os').homedir(), '.browzebot', '../../uploads/frames');
         if (!fs.existsSync(maskDir)) fs.mkdirSync(maskDir, { recursive: true });
 
         if (aspectRatio === '9:16') {
@@ -828,7 +829,7 @@ async function transcribeVideo(videoPath, { openaiKey, groqKey, huggingKey }, io
 }
 
 // ── Local Whisper transcription (no API key needed) ───────────────────────────
-const TRANSCRIBE_PY = path.join(__dirname, 'transcribe.py');
+const TRANSCRIBE_PY = path.join(require('os').homedir(), '.browzebot', 'transcribe.py');
 
 function checkLocalWhisper() {
     return new Promise(resolve => {
@@ -918,10 +919,15 @@ router.post('/generate', async (req, res) => {
         openaiKey, groqKey, huggingKey, whisperModel,
         key, model,
         // ✨ Smart processing options
-        snapWords = true,          
-        removeFillers = true,      
+        snapWords = true,
+        removeFillers = true,
         advancedEditing = false,
-        silenceBuffer = 0.15,      
+        silenceBuffer = 0.15,
+        // 🎬 Retention Editing
+        retentionEdit = false,
+        retentionSilenceThreshold = 0.5,
+        retentionRemoveBreaths    = true,
+        retentionDetectErrors     = true,
     } = req.body;
 
     if (!videoPath || !fs.existsSync(videoPath)) return res.status(400).json({ error: 'Arquivo não encontrado.' });
@@ -976,6 +982,46 @@ router.post('/generate', async (req, res) => {
 
     const transcriptText = transcription?.text || '';
     const hasTranscript  = transcriptText.length > 50;
+
+    // ── Step 1.5: Retention Edit (se ativado) ────────────────────────────────
+    let retentionStats = null;
+    let workingVideoPath = videoPath;    // pode ser substituído pelo vídeo editado
+    let workingWords    = transcription?.words || [];
+
+    if (retentionEdit && transcription?.words?.length > 10) {
+        try {
+            const retOutPath = path.join(CLIPS_DIR, `retention_${jid}.mp4`);
+            if (io) io.emit('clips-log', { type: 'info', message: '🎬 Modo Alta Retenção ativado — iniciando pipeline de edição...' });
+
+            const retResult = await runRetentionPipeline({
+                videoPath:          videoPath,
+                words:              transcription.words,
+                transcript:         transcriptText,
+                outputPath:         retOutPath,
+                videoDuration:      totalDuration,
+                key:                cleanKey,
+                model:              model || 'openai/gpt-4o-mini',
+                io,
+                silenceThreshold:   retentionSilenceThreshold,
+                removeBreaths:      retentionRemoveBreaths,
+                detectErrors:       retentionDetectErrors,
+                removeRepetitions:  retentionDetectErrors,
+                removeFillers,
+            });
+
+            workingVideoPath = retResult.editedVideoPath;
+            workingWords     = retResult.remappedWords;
+            retentionStats   = retResult.stats;
+
+            // Update transcript text from remapped words for AI
+            const remappedText = retResult.remappedWords.map(w => w.word).join(' ');
+            if (remappedText.length > 50) {
+                transcription = { ...transcription, text: remappedText, words: retResult.remappedWords };
+            }
+        } catch (retErr) {
+            if (io) io.emit('clips-log', { type: 'warning', message: `⚠️ Retention Edit falhou: ${retErr.message} — continuando sem edição de retenção` });
+        }
+    }
 
     // ── Step 2: AI moment selection ───────────────────────────────────────────
     const styleGuides = {

@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DB_DIR = path.join(__dirname, '..', 'db');
+const DB_DIR = path.join(require('os').homedir(), '.browzebot', 'db');
 const DB_PATH = path.join(DB_DIR, 'maps_leads.db');
 
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });

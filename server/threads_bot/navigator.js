@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { randomDelay } = require('../bot/utils');
 
-const HISTORY_FILE = path.join(__dirname, 'interacted_posts.json');
+const HISTORY_FILE = path.join(require('os').homedir(), '.browzebot', 'interacted_posts.json');
 
 // Seletores para posts no feed (excluindo comentários e respostas)
 // O Threads usa article para cada post principal no feed

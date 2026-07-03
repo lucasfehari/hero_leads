@@ -3,11 +3,11 @@ const path = require('path');
 
 // We use JSONL (JSON Lines) for performance. 
 // Instead of rewriting a huge JSON file every time, we just append a line.
-const DB_PATH = path.join(__dirname, '..', 'db', 'history.jsonl');
+const DB_PATH = path.join(require('os').homedir(), '.browzebot', 'db', 'history.jsonl');
 
 // Ensure DB directory exists
 if (!fs.existsSync(path.dirname(DB_PATH))) {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    fs.mkdirSync(path.dirname(DB_PATH, { recursive: true }), { recursive: true });
 }
 
 // In-Memory Set for O(1) Lookup (Instant)

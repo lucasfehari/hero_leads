@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DB_DIR = path.join(__dirname);
+const DB_DIR = path.join(require('os').homedir(), '.browzebot');
 const DB_PATH = path.join(DB_DIR, 'instagram_sessions.db');
 
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });

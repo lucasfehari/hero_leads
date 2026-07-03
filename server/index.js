@@ -251,9 +251,9 @@ app.delete('/api/profiles/:name', (req, res) => {
 
 // APIs
 // Set up multer for bot audio uploads
-const BOT_AUDIOS_DIR = path.join(__dirname, 'uploads', 'bot_audios');
-if (!fs.existsSync(path.join(__dirname, 'uploads'))) fs.mkdirSync(path.join(__dirname, 'uploads'));
-if (!fs.existsSync(BOT_AUDIOS_DIR)) fs.mkdirSync(BOT_AUDIOS_DIR);
+const BOT_AUDIOS_DIR = path.join(require('os').homedir(), '.browzebot', 'uploads', 'bot_audios');
+if (!fs.existsSync(path.join(require('os').homedir(), '.browzebot', 'uploads'))) fs.mkdirSync(path.join(require('os').homedir(, { recursive: true }), '.browzebot', 'uploads'));
+if (!fs.existsSync(BOT_AUDIOS_DIR)) fs.mkdirSync(BOT_AUDIOS_DIR, { recursive: true });
 
 const botAudioStorage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, BOT_AUDIOS_DIR),
@@ -475,7 +475,7 @@ app.post('/api/threads/stop', async (req, res) => {
 });
 
 // History API
-const HISTORY_FILE = path.join(__dirname, 'db', 'history.jsonl');
+const HISTORY_FILE = path.join(require('os').homedir(), '.browzebot', 'db', 'history.jsonl');
 
 // History API — SQLite por Perfil
 app.get('/api/history/profiles', (req, res) => {
@@ -617,12 +617,12 @@ app.post('/api/google-maps/stop', async (req, res) => {
 });
 
 // --- Google Maps Profile Management (Session Folders) ---
-const PROFILES_DATA_DIR = path.join(__dirname, '../profiles_data');
-if (!fs.existsSync(PROFILES_DATA_DIR)) fs.mkdirSync(PROFILES_DATA_DIR);
+const PROFILES_DATA_DIR = path.join(require('os').homedir(), '.browzebot', '../profiles_data');
+if (!fs.existsSync(PROFILES_DATA_DIR)) fs.mkdirSync(PROFILES_DATA_DIR, { recursive: true });
 
 app.get('/api/maps/profiles', (req, res) => {
     try {
-        if (!fs.existsSync(PROFILES_DATA_DIR)) fs.mkdirSync(PROFILES_DATA_DIR);
+        if (!fs.existsSync(PROFILES_DATA_DIR)) fs.mkdirSync(PROFILES_DATA_DIR, { recursive: true });
         const files = fs.readdirSync(PROFILES_DATA_DIR, { withFileTypes: true });
         const profiles = files.filter(dirent => dirent.isDirectory()).map(dirent => dirent.name);
         res.json({ profiles });
@@ -710,7 +710,22 @@ const waClient = whatsappService.init(io);
 
 // List all saved sessions
 app.get('/api/whatsapp/sessions', (req, res) => {
-    res.json({ sessions: waClient.listSessions(), current: waClient.currentSession });
+    res.json({ sessions: waClient.listSessions(), current: waClient.currentSession, isPoweredOn: !!waClient.client });
+});
+
+// Power controls
+app.post('/api/whatsapp/power-on', async (req, res) => {
+    try {
+        const result = await waClient.powerOn();
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/whatsapp/power-off', async (req, res) => {
+    try {
+        const result = await waClient.powerOff();
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Switch to a named session (creates new client/QR if no saved auth)

@@ -6,7 +6,7 @@ const multer = require('multer');
 const { db, COOKIES_DIR } = require('./db');
 
 // ── Media Upload (multer) ──────────────────────────────────────────────────
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const UPLOADS_DIR = path.join(require('os').homedir(), '.browzebot', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
