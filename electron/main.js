@@ -116,7 +116,7 @@ function createMainWindow() {
             nodeIntegration: false,
             contextIsolation: true,
         },
-        icon: path.join(__dirname, '../client/public/favicon.ico'),
+        icon: path.join(__dirname, '../build/icon.png'),
         title: 'Browze Bot',
     });
 
