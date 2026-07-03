@@ -40,16 +40,12 @@
             "electron/**/*",
             "server/**/*",
             "client/dist/**/*",
-            "!server/node_modules/**/*",
             "!**/node_modules/.cache/**/*",
             "!server/uploads/**/*",
             "!server/instagram/uploads/**/*",
             "!server/db/*.sqlite*",
             "!server/db/*.db*",
             "!server/.env*"
-        ],
-        "extraResources": [
-            { "from": "server/node_modules", "to": "server/node_modules" }
         ],
         "publish": {
             "provider": "github",
