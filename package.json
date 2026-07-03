@@ -16,6 +16,9 @@
     "build": {
         "appId": "com.browzebot.app",
         "productName": "Browze Bot",
+        "directories": {
+            "output": "bin"
+        },
         "win": {
             "target": "nsis"
         },
