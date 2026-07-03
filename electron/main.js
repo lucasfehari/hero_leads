@@ -16,8 +16,8 @@ let serverProcess;
 // Configurações de Licença
 // ─────────────────────────────────────────────────────────────────
 
-// URL do servidor de licenças (mude para a URL em produção)
-const LICENSE_SERVER = process.env.LICENSE_SERVER || 'https://licenses.browzebot.com.br';
+// URL do servidor de licenças (Render)
+const LICENSE_SERVER = process.env.LICENSE_SERVER || 'https://hero-leads.onrender.com';
 
 // Arquivo local para cache da licença
 const licenseCachePath = path.join(app.getPath('userData'), 'license.json');
@@ -60,7 +60,7 @@ function validateLicenseOnServer(key) {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(body),
             },
-            timeout: 8000,
+            timeout: 30000, // 30s para acomodar cold start do Render gratuito
         };
 
         const lib = url.protocol === 'https:' ? https : http;
@@ -129,14 +129,17 @@ function createMainWindow() {
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+const { fork } = require('child_process');
+
 // ─────────────────────────────────────────────────────────────────
 // Servidor Backend
 // ─────────────────────────────────────────────────────────────────
 function startServer() {
     console.log('[Electron] Iniciando servidor Express na porta 3000...');
-    serverProcess = spawn('node', [path.join(__dirname, '../server/index.js')], {
+    serverProcess = fork(path.join(__dirname, '../server/index.js'), [], {
         cwd: path.join(__dirname, '../server'),
         env: { ...process.env, PORT: '3000' },
+        stdio: 'pipe'
     });
     serverProcess.stdout.on('data', d => console.log('[Server]', d.toString()));
     serverProcess.stderr.on('data', d => console.error('[Server Error]', d.toString()));

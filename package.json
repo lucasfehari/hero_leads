@@ -11,11 +11,13 @@
         "dev": "concurrently --names \"SERVER,CLIENT\" --prefix-colors \"green,cyan\" \"npm run start:server\" \"npm run start:client\"",
         "build:client": "npm run build --prefix client",
         "electron:dev": "concurrently --names \"CLIENT,ELECTRON\" --prefix-colors \"cyan,yellow\" \"npm run start:client\" \"wait-on http://localhost:5173 && electron .\"",
-        "electron:build": "npm run build:client && electron-builder"
+        "electron:build": "npm run build:client && electron-builder",
+        "electron:build:win": "npm run build:client && electron-builder --win"
     },
     "build": {
         "appId": "com.browzebot.app",
         "productName": "Browze Bot",
+        "asar": false,
         "directories": {
             "output": "bin"
         },
@@ -40,7 +42,12 @@
             "server/**/*",
             "client/dist/**/*",
             "!server/node_modules/**/*",
-            "!**/node_modules/.cache/**/*"
+            "!**/node_modules/.cache/**/*",
+            "!server/uploads/**/*",
+            "!server/instagram/uploads/**/*",
+            "!server/db/*.sqlite*",
+            "!server/db/*.db*",
+            "!server/.env*"
         ],
         "extraResources": [
             { "from": "server/node_modules", "to": "server/node_modules" }
