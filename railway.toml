@@ -1,7 +1,7 @@
 [build]
-buildCommand = "npm install && cd server && npm install"
+buildCommand = "cd sales/license-server && npm install"
 
 [deploy]
-startCommand = "node server/index.js"
+startCommand = "node sales/license-server/index.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

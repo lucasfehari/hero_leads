@@ -1,1 +1,1 @@
-web: node server/index.js
+web: node sales/license-server/index.js
