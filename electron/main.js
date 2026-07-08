@@ -129,20 +129,43 @@ function createMainWindow() {
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-const { fork } = require('child_process');
-
 // ─────────────────────────────────────────────────────────────────
 // Servidor Backend
 // ─────────────────────────────────────────────────────────────────
 function startServer() {
     console.log('[Electron] Iniciando servidor Express na porta 3000...');
-    serverProcess = fork(path.join(__dirname, '../server/index.js'), [], {
-        cwd: path.join(__dirname, '../server'),
-        env: { ...process.env, PORT: '3000' },
-        stdio: 'pipe'
+
+    // Quando empacotado (instalado no Windows), os arquivos ficam em app.asar.unpacked
+    // Quando em desenvolvimento, ficam na pasta raiz do projeto
+    let serverDir;
+    let serverScript;
+
+    if (app.isPackaged) {
+        // app.getAppPath() retorna o caminho do .asar
+        // Os arquivos desempacotados ficam em [appPath].unpacked
+        const appPath = app.getAppPath().replace('app.asar', 'app.asar.unpacked');
+        serverDir = path.join(appPath, 'server');
+        serverScript = path.join(serverDir, 'index.js');
+    } else {
+        serverDir = path.join(__dirname, '../server');
+        serverScript = path.join(serverDir, 'index.js');
+    }
+
+    console.log('[Electron] Server path:', serverScript);
+    console.log('[Electron] Server cwd:', serverDir);
+
+    // Usa o Node.js embutido no Electron (process.execPath)
+    // Isso funciona tanto em dev quanto dentro do ASAR empacotado
+    serverProcess = spawn(process.execPath, [serverScript], {
+        cwd: serverDir,
+        env: { ...process.env, PORT: '3000', ELECTRON_RUN_AS_NODE: '1' },
+        stdio: ['ignore', 'pipe', 'pipe']
     });
-    serverProcess.stdout.on('data', d => console.log('[Server]', d.toString()));
-    serverProcess.stderr.on('data', d => console.error('[Server Error]', d.toString()));
+
+    serverProcess.stdout.on('data', d => console.log('[Server]', d.toString().trim()));
+    serverProcess.stderr.on('data', d => console.error('[Server Error]', d.toString().trim()));
+    serverProcess.on('error', e => console.error('[Server] Falha ao iniciar:', e));
+    serverProcess.on('exit', (code, sig) => console.log(`[Server] Encerrado: code=${code} signal=${sig}`));
 }
 
 // ─────────────────────────────────────────────────────────────────
