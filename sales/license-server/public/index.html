@@ -19,14 +19,14 @@
           <div class="glass p-8 rounded-2xl w-full max-w-md glow">
               <h1 class="text-3xl font-extrabold text-white mb-2 tracking-tight">Admin Console</h1>
               <p class="text-slate-400 mb-8 text-sm">Acesso restrito ao núcleo do sistema.</p>
-              <input v-model="inputToken" type="password" placeholder="Admin Token" class="w-full bg-black/50 border border-slate-800 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:border-indigo-500 transition-colors text-white placeholder-slate-600">
+              <input v-model="inputToken" type="password" @keyup.enter="login" placeholder="Admin Token" class="w-full bg-black/50 border border-slate-800 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:border-indigo-500 transition-colors text-white placeholder-slate-600">
               <button @click="login" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-lg transition-colors shadow-lg shadow-indigo-600/20">Acessar Sistema</button>
           </div>
       </div>
 
       <!-- Dashboard -->
       <div v-else>
-          <header class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-10">
+          <header class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8">
               <div>
                   <h1 class="text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
                       <div class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
@@ -40,69 +40,125 @@
           <div v-if="loading" class="text-center py-20 text-indigo-400 animate-pulse font-medium">Estabelecendo conexão segura...</div>
 
           <div v-else>
-              <!-- Cards -->
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
-                  <div class="glass p-6 rounded-2xl relative overflow-hidden group">
-                      <div class="absolute inset-0 bg-gradient-to-br from-indigo-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                      <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Total de Licenças</div>
-                      <div class="text-4xl font-black text-white">{{ stats.total }}</div>
+              <!-- Tabs -->
+              <div class="flex border-b border-slate-800 mb-8">
+                  <button @click="activeTab = 'overview'" :class="{'text-indigo-400 border-b-2 border-indigo-500': activeTab === 'overview', 'text-slate-400 hover:text-slate-200': activeTab !== 'overview'}" class="px-6 py-3 font-medium transition-colors">Visão Geral</button>
+                  <button @click="activeTab = 'licenses'; fetchLicenses()" :class="{'text-indigo-400 border-b-2 border-indigo-500': activeTab === 'licenses', 'text-slate-400 hover:text-slate-200': activeTab !== 'licenses'}" class="px-6 py-3 font-medium transition-colors">Gerenciar Chaves</button>
+              </div>
+
+              <!-- TAB: Visão Geral -->
+              <div v-if="activeTab === 'overview'">
+                  <!-- Cards -->
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+                      <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Total de Licenças</div>
+                          <div class="text-4xl font-black text-white">{{ stats.total }}</div>
+                      </div>
+                      <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Ativas</div>
+                          <div class="text-4xl font-black text-emerald-400">{{ stats.active }}</div>
+                      </div>
+                      <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Vendas Hoje</div>
+                          <div class="text-4xl font-black text-indigo-400">{{ stats.today }}</div>
+                      </div>
+                      <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                          <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Vendas (7 Dias)</div>
+                          <div class="text-4xl font-black text-purple-400">{{ stats.week }}</div>
+                      </div>
                   </div>
-                  <div class="glass p-6 rounded-2xl relative overflow-hidden group">
-                      <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Ativas</div>
-                      <div class="text-4xl font-black text-emerald-400">{{ stats.active }}</div>
-                  </div>
-                  <div class="glass p-6 rounded-2xl relative overflow-hidden group">
-                      <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Vendas Hoje</div>
-                      <div class="text-4xl font-black text-indigo-400">{{ stats.today }}</div>
-                  </div>
-                  <div class="glass p-6 rounded-2xl relative overflow-hidden group">
-                      <div class="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Vendas (7 Dias)</div>
-                      <div class="text-4xl font-black text-purple-400">{{ stats.week }}</div>
+
+                  <!-- Content Últimas Vendas -->
+                  <div class="glass rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
+                      <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 bg-black/20">
+                          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                              Últimas Vendas (Estatísticas)
+                          </h2>
+                          <button @click="simulate" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors shadow-lg shadow-indigo-600/20 w-full md:w-auto">Gerar Chave Manual</button>
+                      </div>
+                      <div class="overflow-x-auto">
+                          <table class="w-full text-left text-sm whitespace-nowrap">
+                              <thead class="bg-black/40 text-slate-400">
+                                  <tr>
+                                      <th class="px-6 py-4 font-medium">Cliente</th>
+                                      <th class="px-6 py-4 font-medium">Plano</th>
+                                      <th class="px-6 py-4 font-medium">Status</th>
+                                      <th class="px-6 py-4 font-medium">Data</th>
+                                  </tr>
+                              </thead>
+                              <tbody class="divide-y divide-slate-800/50">
+                                  <tr v-for="s in stats.recentSales" :key="s.key" class="hover:bg-white/[0.02] transition-colors">
+                                      <td class="px-6 py-4">
+                                          <div class="text-white font-medium">{{ s.name }}</div>
+                                          <div class="text-slate-500 text-xs">{{ s.email }}</div>
+                                      </td>
+                                      <td class="px-6 py-4">
+                                          <span class="text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded text-xs font-medium uppercase tracking-wider">{{ s.plan }}</span>
+                                      </td>
+                                      <td class="px-6 py-4">
+                                          <span :class="{'bg-emerald-500/10 text-emerald-400 border-emerald-500/20': s.status === 'active', 'bg-red-500/10 text-red-400 border-red-500/20': s.status !== 'active'}" class="px-3 py-1 rounded-full text-xs font-semibold border">
+                                              {{ s.status === 'active' ? 'Ativa' : 'Inativa' }}
+                                          </span>
+                                      </td>
+                                      <td class="px-6 py-4 text-slate-400">{{ formatDate(s.created_at) }}</td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                          <div v-if="!stats.recentSales?.length" class="p-12 text-center text-slate-500 font-medium">Nenhuma venda registrada ainda no banco de dados.</div>
+                      </div>
                   </div>
               </div>
 
-              <!-- Content -->
-              <div class="glass rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
-                  <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 bg-black/20">
-                      <h2 class="text-lg font-bold text-white flex items-center gap-2">
-                          <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                          Últimas Vendas
-                      </h2>
-                      <button @click="simulate" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors shadow-lg shadow-indigo-600/20 w-full md:w-auto">Gerar Chave Manual</button>
-                  </div>
-                  <div class="overflow-x-auto">
-                      <table class="w-full text-left text-sm whitespace-nowrap">
-                          <thead class="bg-black/40 text-slate-400">
-                              <tr>
-                                  <th class="px-6 py-4 font-medium">Cliente</th>
-                                  <th class="px-6 py-4 font-medium">Plano</th>
-                                  <th class="px-6 py-4 font-medium">Chave de Licença</th>
-                                  <th class="px-6 py-4 font-medium">Status</th>
-                                  <th class="px-6 py-4 font-medium">Data</th>
-                              </tr>
-                          </thead>
-                          <tbody class="divide-y divide-slate-800/50">
-                              <tr v-for="s in stats.recentSales" :key="s.key" class="hover:bg-white/[0.02] transition-colors">
-                                  <td class="px-6 py-4">
-                                      <div class="text-white font-medium">{{ s.name }}</div>
-                                      <div class="text-slate-500 text-xs">{{ s.email }}</div>
-                                  </td>
-                                  <td class="px-6 py-4">
-                                      <span class="text-indigo-300 bg-indigo-500/10 px-2 py-1 rounded text-xs font-medium uppercase tracking-wider">{{ s.plan }}</span>
-                                  </td>
-                                  <td class="px-6 py-4">
-                                      <code class="bg-black/60 text-indigo-200 px-3 py-1.5 rounded-md border border-slate-700/50 text-xs tracking-[0.2em] font-mono shadow-inner select-all">{{ s.key }}</code>
-                                  </td>
-                                  <td class="px-6 py-4">
-                                      <span :class="{'bg-emerald-500/10 text-emerald-400 border-emerald-500/20': s.status === 'active', 'bg-red-500/10 text-red-400 border-red-500/20': s.status !== 'active'}" class="px-3 py-1 rounded-full text-xs font-semibold border">
-                                          {{ s.status === 'active' ? 'Ativa' : 'Inativa' }}
-                                      </span>
-                                  </td>
-                                  <td class="px-6 py-4 text-slate-400">{{ formatDate(s.created_at) }}</td>
-                              </tr>
-                          </tbody>
-                      </table>
-                      <div v-if="!stats.recentSales?.length" class="p-12 text-center text-slate-500 font-medium">Nenhuma venda registrada ainda no banco de dados.</div>
+              <!-- TAB: Gerenciar Chaves -->
+              <div v-if="activeTab === 'licenses'">
+                  <div class="glass rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
+                      <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 bg-black/20">
+                          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                              Gerenciador de Licenças
+                          </h2>
+                          <div class="flex items-center gap-4 w-full md:w-auto">
+                              <input v-model="searchQuery" @keyup.enter="fetchLicenses" type="text" placeholder="Buscar email, nome ou chave..." class="w-full md:w-80 bg-black/50 border border-slate-800 rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 transition-colors text-white placeholder-slate-600 text-sm">
+                              <button @click="fetchLicenses" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-slate-700">Buscar</button>
+                          </div>
+                      </div>
+                      
+                      <div v-if="loadingLicenses" class="p-12 text-center text-indigo-400 animate-pulse font-medium">Carregando licenças...</div>
+                      <div v-else class="overflow-x-auto">
+                          <table class="w-full text-left text-sm whitespace-nowrap">
+                              <thead class="bg-black/40 text-slate-400">
+                                  <tr>
+                                      <th class="px-6 py-4 font-medium">Chave</th>
+                                      <th class="px-6 py-4 font-medium">Cliente</th>
+                                      <th class="px-6 py-4 font-medium">Status</th>
+                                      <th class="px-6 py-4 font-medium">Criada em</th>
+                                      <th class="px-6 py-4 font-medium text-right">Ações</th>
+                                  </tr>
+                              </thead>
+                              <tbody class="divide-y divide-slate-800/50">
+                                  <tr v-for="l in allLicenses" :key="l.key" class="hover:bg-white/[0.02] transition-colors">
+                                      <td class="px-6 py-4">
+                                          <code class="bg-black/60 text-indigo-200 px-3 py-1.5 rounded-md border border-slate-700/50 text-xs tracking-[0.1em] font-mono shadow-inner select-all">{{ l.key }}</code>
+                                      </td>
+                                      <td class="px-6 py-4">
+                                          <div class="text-white font-medium">{{ l.name || '-' }}</div>
+                                          <div class="text-slate-500 text-xs">{{ l.email }}</div>
+                                      </td>
+                                      <td class="px-6 py-4">
+                                          <span :class="{'bg-emerald-500/10 text-emerald-400 border-emerald-500/20': l.status === 'active', 'bg-red-500/10 text-red-400 border-red-500/20': l.status === 'revoked', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20': l.status === 'expired'}" class="px-3 py-1 rounded-full text-xs font-semibold border">
+                                              {{ l.status }}
+                                          </span>
+                                      </td>
+                                      <td class="px-6 py-4 text-slate-400">{{ formatDate(l.created_at) }}</td>
+                                      <td class="px-6 py-4 text-right flex justify-end gap-2">
+                                          <button v-if="l.status !== 'active'" @click="toggleStatus(l.key, 'active')" class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded text-xs font-medium transition-colors">Ativar</button>
+                                          <button v-if="l.status === 'active'" @click="toggleStatus(l.key, 'revoked')" class="bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-3 py-1.5 rounded text-xs font-medium transition-colors">Revogar</button>
+                                          <button @click="deleteLicense(l.key)" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded text-xs font-medium transition-colors">Excluir</button>
+                                      </td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                          <div v-if="!allLicenses.length" class="p-12 text-center text-slate-500 font-medium">Nenhuma licença encontrada.</div>
+                      </div>
                   </div>
               </div>
           </div>
@@ -118,23 +174,76 @@
               const inputToken = ref('');
               const stats = ref({});
               const loading = ref(false);
+              
+              // Novos estados para a aba de CRUD
+              const activeTab = ref('overview');
+              const allLicenses = ref([]);
+              const loadingLicenses = ref(false);
+              const searchQuery = ref('');
+
+              const apiCall = async (url, options = {}) => {
+                  const res = await fetch(url, {
+                      ...options,
+                      headers: { 
+                          'Content-Type': 'application/json',
+                          'x-admin-token': token.value,
+                          ...options.headers
+                      }
+                  });
+                  if (!res.ok) {
+                      if (res.status === 401) { logout(); throw new Error('Sessão expirada. Faça login novamente.'); }
+                      const err = await res.json();
+                      throw new Error(err.error || 'Erro desconhecido');
+                  }
+                  return res.json();
+              };
 
               const fetchStats = async () => {
                   loading.value = true;
                   try {
-                      // O HTML é servido da mesma URL, então o caminho relativo funciona perfeitamente
-                      const res = await fetch('/admin/stats', {
-                          headers: { 'x-admin-token': token.value }
-                      });
-                      if (!res.ok) {
-                          if (res.status === 401) logout();
-                          throw new Error('Credenciais inválidas');
-                      }
-                      stats.value = await res.json();
+                      stats.value = await apiCall('/admin/stats');
                   } catch (e) {
                       console.error(e);
                   } finally {
                       loading.value = false;
+                  }
+              };
+
+              const fetchLicenses = async () => {
+                  loadingLicenses.value = true;
+                  try {
+                      const url = `/admin/licenses${searchQuery.value ? '?q=' + encodeURIComponent(searchQuery.value) : ''}`;
+                      const data = await apiCall(url);
+                      allLicenses.value = data.licenses || [];
+                  } catch (e) {
+                      console.error(e);
+                  } finally {
+                      loadingLicenses.value = false;
+                  }
+              };
+
+              const toggleStatus = async (key, newStatus) => {
+                  if (!confirm(`Deseja realmente ${newStatus === 'active' ? 'ativar' : 'revogar'} esta chave?`)) return;
+                  try {
+                      await apiCall(`/admin/licenses/${key}`, {
+                          method: 'PUT',
+                          body: JSON.stringify({ status: newStatus })
+                      });
+                      fetchLicenses();
+                      if (activeTab.value === 'overview') fetchStats();
+                  } catch(e) {
+                      alert(e.message);
+                  }
+              };
+
+              const deleteLicense = async (key) => {
+                  if (!confirm("⚠️ ATENÇÃO: Deseja realmente EXCLUIR esta licença? Esta ação não pode ser desfeita e os logs de uso dela também serão removidos.")) return;
+                  try {
+                      await apiCall(`/admin/licenses/${key}`, { method: 'DELETE' });
+                      fetchLicenses();
+                      if (activeTab.value === 'overview') fetchStats();
+                  } catch(e) {
+                      alert(e.message);
                   }
               };
 
@@ -157,17 +266,14 @@
                   const plan = prompt("Plano (monthly, annual, lifetime):", "lifetime") || "lifetime";
                   
                   try {
-                      alert('Gerando licença... aguarde.');
-                      await fetch('/admin/simulate-sale', {
+                      alert('Gerando licença... aguarde o e-mail ser disparado.');
+                      await apiCall('/admin/simulate-sale', {
                           method: 'POST',
-                          headers: { 
-                              'Content-Type': 'application/json',
-                              'x-admin-token': token.value 
-                          },
                           body: JSON.stringify({ email, name: "Gerado via Painel", plan })
                       });
-                      alert('✅ Chave gerada e email enviado com sucesso!');
+                      alert('✅ Chave gerada! O e-mail foi enviado com sucesso para o cliente.');
                       fetchStats();
+                      if(activeTab.value === 'licenses') fetchLicenses();
                   } catch (e) {
                       alert('Erro ao gerar: ' + e.message);
                   }
@@ -184,7 +290,12 @@
                   if (token.value) fetchStats();
               });
 
-              return { token, inputToken, stats, loading, login, logout, simulate, formatDate };
+              return { 
+                  token, inputToken, stats, loading, 
+                  activeTab, allLicenses, loadingLicenses, searchQuery,
+                  login, logout, simulate, formatDate,
+                  fetchLicenses, toggleStatus, deleteLicense
+              };
           }
       }).mount('#app');
   </script>

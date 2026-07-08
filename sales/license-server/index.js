@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const { v4: uuidv4 } = require("uuid");
 const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -118,14 +119,34 @@ async function sendLicenseEmail(email, name, licenseKey, plan = "lifetime") {
     </body>
     </html>
   `;
+  const subject = `⚡ Sua chave de licença do Browze Bot chegou! (${planLabel(plan)})`;
+  
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
+      await resend.emails.send({
+        from: `"Browze Bot" <${fromEmail}>`,
+        to: email,
+        subject,
+        html,
+      });
+      return;
+    } catch (err) {
+      console.warn("[RESEND ERROR]", err.message, "Falling back to Nodemailer");
+    }
+  }
 
-  await transporter.sendMail({
-    from: `"Browze Bot" <${process.env.SMTP_USER}>`,
-    to: email,
-    subject: `⚡ Sua chave de licença do Browze Bot chegou! (${planLabel(plan)})`,
-    html,
-  });
+  if (process.env.SMTP_USER) {
+    await transporter.sendMail({
+      from: `"Browze Bot" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject,
+      html,
+    });
+  }
 }
+
 
 // ─── Helpers de Plano ─────────────────────────────────────────────────────────
 function getExpiresAt(plan) {
@@ -600,6 +621,64 @@ app.get("/admin/logs", requireAdmin, (req, res) => {
   query += " ORDER BY created_at DESC LIMIT 100";
   const logs = db.prepare(query).all(...params);
   res.json({ logs });
+});
+
+// ─── CRUD DE LICENÇAS (ADMIN) ──────────────────────────────────────────────────
+
+// Listar todas as licenças (com busca opcional)
+app.get("/admin/licenses", requireAdmin, (req, res) => {
+  const { q } = req.query;
+  let query = "SELECT * FROM licenses";
+  let params = [];
+  
+  if (q) {
+    query += " WHERE key LIKE ? OR email LIKE ? OR name LIKE ?";
+    const search = `%${q}%`;
+    params = [search, search, search];
+  }
+  
+  query += " ORDER BY created_at DESC";
+  
+  try {
+    const licenses = db.prepare(query).all(...params);
+    res.json({ licenses });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Atualizar status da licença
+app.put("/admin/licenses/:key", requireAdmin, (req, res) => {
+  const { key } = req.params;
+  const { status } = req.body;
+  
+  if (!['active', 'revoked', 'expired'].includes(status)) {
+    return res.status(400).json({ error: "Status inválido" });
+  }
+
+  try {
+    const result = db.prepare("UPDATE licenses SET status = ? WHERE key = ?").run(status, key);
+    if (result.changes === 0) return res.status(404).json({ error: "Licença não encontrada" });
+    res.json({ success: true, key, status });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Excluir licença
+app.delete("/admin/licenses/:key", requireAdmin, (req, res) => {
+  const { key } = req.params;
+  
+  try {
+    // Também limpa logs vinculados
+    db.prepare("DELETE FROM activation_log WHERE license_key = ?").run(key);
+    const result = db.prepare("DELETE FROM licenses WHERE key = ?").run(key);
+    
+    if (result.changes === 0) return res.status(404).json({ error: "Licença não encontrada" });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── Simular venda manualmente (para testes) ──────────────────────────────────
