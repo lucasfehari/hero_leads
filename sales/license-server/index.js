@@ -52,7 +52,7 @@ function planLabel(plan) {
 }
 
 async function sendLicenseEmail(email, name, licenseKey, plan = "lifetime") {
-  if (!process.env.SMTP_USER) return;
+  if (!process.env.SMTP_USER && !process.env.RESEND_API_KEY) return;
 
   const html = `
     <!DOCTYPE html>
@@ -147,7 +147,6 @@ async function sendLicenseEmail(email, name, licenseKey, plan = "lifetime") {
   }
 }
 
-
 // ─── Helpers de Plano ─────────────────────────────────────────────────────────
 function getExpiresAt(plan) {
   if (plan === "monthly") {
@@ -221,9 +220,10 @@ function generateLicenseKey() {
 // Lógica central de criação de licença a partir de uma venda
 async function createLicenseFromSale({ email, name, plan, orderId, notes }) {
   // Verificar se já existe licença para este pedido
-  const existing = db
+  const existing = await db
     .prepare("SELECT * FROM licenses WHERE abacate_order = ?")
     .get(orderId);
+    
   if (existing) {
     return { duplicate: true, key: existing.key };
   }
@@ -231,7 +231,7 @@ async function createLicenseFromSale({ email, name, plan, orderId, notes }) {
   const licenseKey = generateLicenseKey();
   const expiresAt = getExpiresAt(plan);
 
-  db.prepare(
+  await db.prepare(
     `
     INSERT INTO licenses (key, email, name, plan, status, abacate_order, expires_at, notes)
     VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
@@ -269,79 +269,83 @@ app.get("/", (req, res) => {
 });
 
 // Validar licença (chamado pelo app Electron)
-app.post("/validate", express.json(), (req, res) => {
-  const { key, machine_id } = req.body;
+app.post("/validate", express.json(), async (req, res) => {
+  try {
+    const { key, machine_id } = req.body;
 
-  if (!key || !machine_id) {
-    return res
-      .status(400)
-      .json({ valid: false, error: "Chave e machine_id são obrigatórios" });
-  }
+    if (!key || !machine_id) {
+      return res
+        .status(400)
+        .json({ valid: false, error: "Chave e machine_id são obrigatórios" });
+    }
 
-  const license = db.prepare("SELECT * FROM licenses WHERE key = ?").get(key);
+    const license = await db.prepare("SELECT * FROM licenses WHERE key = ?").get(key);
 
-  if (!license) {
-    return res.json({ valid: false, error: "Licença não encontrada" });
-  }
+    if (!license) {
+      return res.json({ valid: false, error: "Licença não encontrada" });
+    }
 
-  if (license.status !== "active") {
-    return res.json({
-      valid: false,
-      error: `Licença ${license.status === "revoked" ? "revogada" : "expirada"}`,
-    });
-  }
-
-  // Verificar expiração
-  if (license.expires_at && new Date(license.expires_at) < new Date()) {
-    db.prepare("UPDATE licenses SET status = 'expired' WHERE key = ?").run(key);
-    return res.json({
-      valid: false,
-      error: "Licença expirada. Renove seu plano em browzebot.com.br",
-    });
-  }
-
-  // Verificar machine_id
-  if (license.machine_id && license.machine_id !== machine_id) {
-    const activationCount = db
-      .prepare(
-        "SELECT COUNT(*) as count FROM activation_log WHERE license_key = ? AND action = 'activate'",
-      )
-      .get(key);
-
-    if (activationCount.count >= license.max_devices) {
-      db.prepare(
-        "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'blocked', ?)",
-      ).run(key, machine_id, req.ip);
-
+    if (license.status !== "active") {
       return res.json({
         valid: false,
-        error:
-          "Limite de dispositivos atingido. Entre em contato com o suporte.",
+        error: `Licença ${license.status === "revoked" ? "revogada" : "expirada"}`,
       });
     }
-  }
 
-  // Atualizar machine_id se for primeira ativação
-  if (!license.machine_id) {
-    db.prepare(
-      "UPDATE licenses SET machine_id = ?, activations = activations + 1 WHERE key = ?",
-    ).run(machine_id, key);
-    db.prepare(
-      "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'activate', ?)",
-    ).run(key, machine_id, req.ip);
-  } else {
-    db.prepare(
-      "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'use', ?)",
-    ).run(key, machine_id, req.ip);
-  }
+    // Verificar expiração
+    if (license.expires_at && new Date(license.expires_at) < new Date()) {
+      await db.prepare("UPDATE licenses SET status = 'expired' WHERE key = ?").run(key);
+      return res.json({
+        valid: false,
+        error: "Licença expirada. Renove seu plano em browzebot.com.br",
+      });
+    }
 
-  res.json({
-    valid: true,
-    plan: license.plan,
-    name: license.name,
-    email: license.email,
-    expires_at: license.expires_at,
-  });
+    // Verificar machine_id
+    if (license.machine_id && license.machine_id !== machine_id) {
+      const activationCount = await db
+        .prepare(
+          "SELECT COUNT(*) as count FROM activation_log WHERE license_key = ? AND action = 'activate'",
+        )
+        .get(key);
+
+      if (activationCount.count >= license.max_devices) {
+        await db.prepare(
+          "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'blocked', ?)",
+        ).run(key, machine_id, req.ip);
+
+        return res.json({
+          valid: false,
+          error:
+            "Limite de dispositivos atingido. Entre em contato com o suporte.",
+        });
+      }
+    }
+
+    // Atualizar machine_id se for primeira ativação
+    if (!license.machine_id) {
+      await db.prepare(
+        "UPDATE licenses SET machine_id = ?, activations = activations + 1 WHERE key = ?",
+      ).run(machine_id, key);
+      await db.prepare(
+        "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'activate', ?)",
+      ).run(key, machine_id, req.ip);
+    } else {
+      await db.prepare(
+        "INSERT INTO activation_log (license_key, machine_id, action, ip) VALUES (?, ?, 'use', ?)",
+      ).run(key, machine_id, req.ip);
+    }
+
+    res.json({
+      valid: true,
+      plan: license.plan,
+      name: license.name,
+      email: license.email,
+      expires_at: license.expires_at,
+    });
+  } catch (err) {
+    res.status(500).json({ valid: false, error: "Erro interno no servidor." });
+  }
 });
 
 // ─── WEBHOOK ABACATE PAY ──────────────────────────────────────────────────────
@@ -439,208 +443,74 @@ console.log("[Abacate Pay] Webhook pronto em POST /webhook/abacatepay");
 
 // ─── ROTAS ADMIN ─────────────────────────────────────────────────────────────
 
-// Listar todas as licenças
-app.get("/admin/licenses", requireAdmin, (req, res) => {
-  const { status, search, page = 1, limit = 50 } = req.query;
-  let query = "SELECT * FROM licenses";
-  const params = [];
-
-  const conditions = [];
-  if (status) {
-    conditions.push("status = ?");
-    params.push(status);
-  }
-  if (search) {
-    conditions.push("(email LIKE ? OR name LIKE ? OR key LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-  }
-  if (conditions.length) query += " WHERE " + conditions.join(" AND ");
-
-  query += " ORDER BY created_at DESC";
-  query += ` LIMIT ${parseInt(limit)} OFFSET ${(parseInt(page) - 1) * parseInt(limit)}`;
-
-  const licenses = db.prepare(query).all(...params);
-  const total = db
-    .prepare("SELECT COUNT(*) as count FROM licenses")
-    .get().count;
-
-  res.json({ licenses, total, page: parseInt(page), limit: parseInt(limit) });
-});
-
-// Criar licença manualmente
-app.post("/admin/licenses", requireAdmin, async (req, res) => {
-  const {
-    email,
-    name,
-    plan = "lifetime",
-    max_devices = 1,
-    expires_at,
-    notes,
-    send_email = true,
-  } = req.body;
-
-  if (!email) return res.status(400).json({ error: "Email obrigatório" });
-
-  const licenseKey = generateLicenseKey();
-  const expiresAt = expires_at || getExpiresAt(plan);
-
-  db.prepare(
-    `
-    INSERT INTO licenses (key, email, name, plan, status, max_devices, expires_at, notes)
-    VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
-  `,
-  ).run(
-    licenseKey,
-    email,
-    name || "",
-    plan,
-    max_devices,
-    expiresAt,
-    notes || null,
-  );
-
-  if (send_email) {
-    try {
-      await sendLicenseEmail(email, name, licenseKey, plan);
-    } catch (e) {
-      console.warn("Email não enviado:", e.message);
-    }
-  }
-
-  res.json({ success: true, key: licenseKey, plan, expires_at: expiresAt });
-});
-
-// Revogar licença
-app.post("/admin/licenses/revoke/:key", requireAdmin, (req, res) => {
-  const { key } = req.params;
-  const result = db
-    .prepare("UPDATE licenses SET status = 'revoked' WHERE key = ?")
-    .run(key);
-  if (result.changes === 0)
-    return res.status(404).json({ error: "Licença não encontrada" });
-  res.json({ success: true, message: `Licença ${key} revogada` });
-});
-
-// Reativar licença
-app.post("/admin/licenses/activate/:key", requireAdmin, (req, res) => {
-  const { key } = req.params;
-  const result = db
-    .prepare(
-      "UPDATE licenses SET status = 'active', machine_id = NULL, activations = 0 WHERE key = ?",
-    )
-    .run(key);
-  if (result.changes === 0)
-    return res.status(404).json({ error: "Licença não encontrada" });
-  res.json({ success: true, message: `Licença ${key} reativada e resetada` });
-});
-
-// Renovar plano (atualiza expires_at)
-app.post("/admin/licenses/renew/:key", requireAdmin, (req, res) => {
-  const { key } = req.params;
-  const { plan } = req.body;
-  const license = db.prepare("SELECT * FROM licenses WHERE key = ?").get(key);
-  if (!license)
-    return res.status(404).json({ error: "Licença não encontrada" });
-
-  const newPlan = plan || license.plan;
-  const expiresAt = getExpiresAt(newPlan);
-
-  db.prepare(
-    "UPDATE licenses SET plan = ?, expires_at = ?, status = 'active' WHERE key = ?",
-  ).run(newPlan, expiresAt, key);
-  res.json({ success: true, plan: newPlan, expires_at: expiresAt });
-});
-
-// Deletar licença
-app.delete("/admin/licenses/:key", requireAdmin, (req, res) => {
-  const { key } = req.params;
-  db.prepare("DELETE FROM activation_log WHERE license_key = ?").run(key);
-  const result = db.prepare("DELETE FROM licenses WHERE key = ?").run(key);
-  if (result.changes === 0)
-    return res.status(404).json({ error: "Licença não encontrada" });
-  res.json({ success: true });
-});
-
 // Estatísticas do dashboard
-app.get("/admin/stats", requireAdmin, (req, res) => {
-  const total = db
-    .prepare("SELECT COUNT(*) as count FROM licenses")
-    .get().count;
-  const active = db
-    .prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'active'")
-    .get().count;
-  const revoked = db
-    .prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'revoked'")
-    .get().count;
-  const expired = db
-    .prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'expired'")
-    .get().count;
-  const today = db
-    .prepare(
-      "SELECT COUNT(*) as count FROM licenses WHERE date(created_at) = date('now')",
-    )
-    .get().count;
-  const week = db
-    .prepare(
-      "SELECT COUNT(*) as count FROM licenses WHERE created_at >= datetime('now', '-7 days')",
-    )
-    .get().count;
+app.get("/admin/stats", requireAdmin, async (req, res) => {
+  try {
+    const total = (await db.prepare("SELECT COUNT(*) as count FROM licenses").get()).count;
+    const active = (await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'active'").get()).count;
+    const revoked = (await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'revoked'").get()).count;
+    const expired = (await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE status = 'expired'").get()).count;
+    const today = (await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE date(created_at) = date('now')").get()).count;
+    const week = (await db.prepare("SELECT COUNT(*) as count FROM licenses WHERE created_at >= datetime('now', '-7 days')").get()).count;
 
-  // Breakdown por plano
-  const byPlan = db
-    .prepare("SELECT plan, COUNT(*) as count FROM licenses GROUP BY plan")
-    .all();
+    // Breakdown por plano
+    const byPlan = await db.prepare("SELECT plan, COUNT(*) as count FROM licenses GROUP BY plan").all();
 
-  const recentSales = db
-    .prepare(
-      "SELECT key, email, name, plan, status, expires_at, created_at FROM licenses ORDER BY created_at DESC LIMIT 10",
-    )
-    .all();
+    const recentSales = await db
+      .prepare("SELECT key, email, name, plan, status, expires_at, created_at FROM licenses ORDER BY created_at DESC LIMIT 10")
+      .all();
 
-  res.json({
-    total,
-    active,
-    revoked,
-    expired,
-    today,
-    week,
-    byPlan,
-    recentSales,
-  });
+    res.json({
+      total,
+      active,
+      revoked,
+      expired,
+      today,
+      week,
+      byPlan,
+      recentSales,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Log de ativações
-app.get("/admin/logs", requireAdmin, (req, res) => {
-  const { key } = req.query;
-  let query = "SELECT * FROM activation_log";
-  const params = [];
-  if (key) {
-    query += " WHERE license_key = ?";
-    params.push(key);
+app.get("/admin/logs", requireAdmin, async (req, res) => {
+  try {
+    const { key } = req.query;
+    let query = "SELECT * FROM activation_log";
+    const params = [];
+    if (key) {
+      query += " WHERE license_key = ?";
+      params.push(key);
+    }
+    query += " ORDER BY created_at DESC LIMIT 100";
+    const logs = await db.prepare(query).all(...params);
+    res.json({ logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  query += " ORDER BY created_at DESC LIMIT 100";
-  const logs = db.prepare(query).all(...params);
-  res.json({ logs });
 });
 
 // ─── CRUD DE LICENÇAS (ADMIN) ──────────────────────────────────────────────────
 
 // Listar todas as licenças (com busca opcional)
-app.get("/admin/licenses", requireAdmin, (req, res) => {
-  const { q } = req.query;
-  let query = "SELECT * FROM licenses";
-  let params = [];
-  
-  if (q) {
-    query += " WHERE key LIKE ? OR email LIKE ? OR name LIKE ?";
-    const search = `%${q}%`;
-    params = [search, search, search];
-  }
-  
-  query += " ORDER BY created_at DESC";
-  
+app.get("/admin/licenses", requireAdmin, async (req, res) => {
   try {
-    const licenses = db.prepare(query).all(...params);
+    const { q } = req.query;
+    let query = "SELECT * FROM licenses";
+    let params = [];
+    
+    if (q) {
+      query += " WHERE key LIKE ? OR email LIKE ? OR name LIKE ?";
+      const search = `%${q}%`;
+      params = [search, search, search];
+    }
+    
+    query += " ORDER BY created_at DESC";
+    
+    const licenses = await db.prepare(query).all(...params);
     res.json({ licenses });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -648,16 +518,16 @@ app.get("/admin/licenses", requireAdmin, (req, res) => {
 });
 
 // Atualizar status da licença
-app.put("/admin/licenses/:key", requireAdmin, (req, res) => {
-  const { key } = req.params;
-  const { status } = req.body;
-  
-  if (!['active', 'revoked', 'expired'].includes(status)) {
-    return res.status(400).json({ error: "Status inválido" });
-  }
-
+app.put("/admin/licenses/:key", requireAdmin, async (req, res) => {
   try {
-    const result = db.prepare("UPDATE licenses SET status = ? WHERE key = ?").run(status, key);
+    const { key } = req.params;
+    const { status } = req.body;
+    
+    if (!['active', 'revoked', 'expired'].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const result = await db.prepare("UPDATE licenses SET status = ? WHERE key = ?").run(status, key);
     if (result.changes === 0) return res.status(404).json({ error: "Licença não encontrada" });
     res.json({ success: true, key, status });
   } catch (e) {
@@ -666,13 +536,13 @@ app.put("/admin/licenses/:key", requireAdmin, (req, res) => {
 });
 
 // Excluir licença
-app.delete("/admin/licenses/:key", requireAdmin, (req, res) => {
-  const { key } = req.params;
-  
+app.delete("/admin/licenses/:key", requireAdmin, async (req, res) => {
   try {
+    const { key } = req.params;
+    
     // Também limpa logs vinculados
-    db.prepare("DELETE FROM activation_log WHERE license_key = ?").run(key);
-    const result = db.prepare("DELETE FROM licenses WHERE key = ?").run(key);
+    await db.prepare("DELETE FROM activation_log WHERE license_key = ?").run(key);
+    const result = await db.prepare("DELETE FROM licenses WHERE key = ?").run(key);
     
     if (result.changes === 0) return res.status(404).json({ error: "Licença não encontrada" });
     res.json({ success: true });
@@ -683,18 +553,22 @@ app.delete("/admin/licenses/:key", requireAdmin, (req, res) => {
 
 // ─── Simular venda manualmente (para testes) ──────────────────────────────────
 app.post("/admin/simulate-sale", requireAdmin, async (req, res) => {
-  const { email, name, plan = "monthly" } = req.body;
-  if (!email) return res.status(400).json({ error: "Email obrigatório" });
+  try {
+    const { email, name, plan = "monthly" } = req.body;
+    if (!email) return res.status(400).json({ error: "Email obrigatório" });
 
-  const result = await createLicenseFromSale({
-    email,
-    name: name || email,
-    plan,
-    orderId: `SIMULADO-${Date.now()}`,
-    notes: "Venda simulada manualmente",
-  });
+    const result = await createLicenseFromSale({
+      email,
+      name: name || email,
+      plan,
+      orderId: `SIMULADO-${Date.now()}`,
+      notes: "Venda simulada manualmente",
+    });
 
-  res.json({ success: true, ...result, plan });
+    res.json({ success: true, ...result, plan });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── START (async: aguarda DB antes de ouvir) ────────────────────────────────
@@ -703,7 +577,7 @@ async function init() {
   db = await createDb();
 
   // 2. Cria tabelas
-  db.exec(`
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS licenses (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       key         TEXT UNIQUE NOT NULL,
@@ -731,7 +605,7 @@ async function init() {
 
   // 3. Migração silenciosa: cakto_order → abacate_order
   try {
-    db.exec(`ALTER TABLE licenses RENAME COLUMN cakto_order TO abacate_order`);
+    await db.exec(`ALTER TABLE licenses RENAME COLUMN cakto_order TO abacate_order`);
     console.log("[DB] Coluna cakto_order renomeada para abacate_order.");
   } catch (_) {
     /* já existe ou não precisa */
