@@ -58,3 +58,8 @@ server/instagram/uploads/*
 *.njsproj
 *.sln
 *.sw?
+
+# Build outputs
+bin/
+fix_mkdir.js
+fix_paths.js

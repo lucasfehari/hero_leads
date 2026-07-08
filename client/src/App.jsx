@@ -113,64 +113,77 @@ const NAV = [
 ];
 
 const THEME = {
-  dashboard: { glow: 'rgba(99,102,241,0.18)', accent: '#6366f1', label: 'Overview' },
-  instagram: { glow: 'rgba(225,48,108,0.18)', accent: '#e1306c', label: 'Instagram Studio' },
-  threads: { glow: 'rgba(255,255,255,0.08)', accent: '#ffffff', label: 'Threads Studio' },
-  maps: { glow: 'rgba(66,133,244,0.18)', accent: '#4285f4', label: 'Maps Studio' },
-  whatsapp: { glow: 'rgba(37,211,102,0.15)', accent: '#25d366', label: 'WhatsApp Studio' },
-  socialmedia: { glow: 'rgba(236,72,153,0.15)', accent: '#ec4899', label: 'Social Studio' },
-  videoclips: { glow: 'rgba(168,85,247,0.20)', accent: '#a855f7', label: 'Cortes de Vídeo ✂️' },
+  dashboard:   { glow: 'rgba(0,255,89,0.12)',  accent: '#00FF59', label: 'Dashboard' },
+  instagram:   { glow: 'rgba(0,255,89,0.10)',  accent: '#4EFFAA', label: 'Instagram Bot' },
+  threads:     { glow: 'rgba(78,255,170,0.10)', accent: '#4EFFAA', label: 'Threads Bot' },
+  maps:        { glow: 'rgba(0,255,89,0.10)',  accent: '#00FF59', label: 'Google Maps' },
+  whatsapp:    { glow: 'rgba(0,255,89,0.12)',  accent: '#00FF59', label: 'WhatsApp' },
+  socialmedia: { glow: 'rgba(78,255,170,0.10)', accent: '#4EFFAA', label: 'Social Media' },
+  videoclips:  { glow: 'rgba(0,255,89,0.12)',  accent: '#00FF59', label: 'Cortes de Vídeo' },
 };
 
 // ─── SIDEBAR NAV ITEM ─────────────────────────────────
 function NavItem({ item, active, onClick }) {
-  const theme = THEME[item.id] || THEME.instagram;
   return (
     <button
       onClick={onClick}
-      className={`w-full group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 relative overflow-hidden ${active
-        ? 'text-white'
-        : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
-        }`}
+      className={`w-full group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 relative overflow-hidden`}
       style={active ? {
-        background: `linear-gradient(135deg, ${theme.accent}22 0%, ${theme.accent}10 100%)`,
-        boxShadow: `inset 0 0 0 1px ${theme.accent}33`,
-      } : {}}
+        background: 'rgba(0,255,89,0.07)',
+        border: '1px solid rgba(0,255,89,0.18)',
+        color: '#F2F5F9',
+      } : {
+        color: '#5a605c',
+        border: '1px solid transparent',
+      }}
+      onMouseEnter={e => { if (!active) { e.currentTarget.style.color = '#F2F5F9'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}}
+      onMouseLeave={e => { if (!active) { e.currentTarget.style.color = '#5a605c'; e.currentTarget.style.background = 'transparent'; }}}
     >
       {active && (
         <span
-          className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
-          style={{ background: theme.accent }}
+          className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 rounded-r-full"
+          style={{ background: 'linear-gradient(180deg, #00FF59, #4EFFAA)' }}
         />
       )}
       <span
-        style={{ color: active ? theme.accent : undefined }}
-        className={`shrink-0 w-5 flex items-center justify-center transition-all duration-200 ${active ? 'opacity-100 scale-105' : 'opacity-50 grayscale-[35%] group-hover:opacity-90 group-hover:grayscale-0'}`}
+        style={{ color: active ? '#00FF59' : 'inherit' }}
+        className={`shrink-0 w-5 flex items-center justify-center transition-all duration-200 ${active ? 'opacity-100' : 'opacity-40 group-hover:opacity-80'}`}
       >
         {item.icon}
       </span>
-      <span className="flex-1 text-left">{item.label}</span>
+      <span className="flex-1 text-left tracking-wide" style={{ fontSize: '13px', fontWeight: active ? 600 : 400 }}>{item.label}</span>
     </button>
   );
 }
 
-// ─── LOGO ICON (Brand "B") ─────────────────────────────
+// ─── LOGO ICON (Browze Bot Brand) ─────────────────────────────
 function BrowzeLogo() {
   return (
     <div className="relative">
       <div
-        className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg"
-        style={{ background: 'linear-gradient(135deg, #17BF60 0%, #0d9448 100%)' }}
+        className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden"
+        style={{
+          background: '#000',
+          border: '1px solid rgba(0,255,89,0.3)',
+          boxShadow: '0 0 16px rgba(0,255,89,0.2)'
+        }}
       >
-        <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
-          <path d="M5 4h7a4 4 0 0 1 0 8H5V4z" fill="#BCF285" />
-          <path d="M5 12h8a4 4 0 0 1 0 8H5v-8z" fill="white" fillOpacity="0.92" />
-        </svg>
+        <img
+          src="/logo.png"
+          alt="Browze Bot"
+          className="w-7 h-7 object-contain"
+          onError={e => {
+            e.target.style.display = 'none';
+            e.target.nextSibling.style.display = 'flex';
+          }}
+        />
+        <div style={{ display: 'none' }} className="w-full h-full items-center justify-center">
+          <span style={{ color: '#00FF59', fontWeight: 800, fontSize: 16, fontFamily: 'Space Grotesk' }}>B</span>
+        </div>
       </div>
-      {/* Glow under logo */}
       <div
-        className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-2 rounded-full blur-md opacity-60"
-        style={{ background: '#17BF60' }}
+        className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-5 h-1.5 rounded-full blur-sm"
+        style={{ background: '#00FF59', opacity: 0.5 }}
       />
     </div>
   );
@@ -179,17 +192,17 @@ function BrowzeLogo() {
 // ─── STATUS BADGE ─────────────────────────────────────
 function StatusBadge({ isRunning, status }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border"
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full"
       style={isRunning
-        ? { background: 'rgba(23,191,96,0.08)', borderColor: 'rgba(23,191,96,0.25)' }
-        : { background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.06)' }
+        ? { background: 'rgba(0,255,89,0.07)', border: '1px solid rgba(0,255,89,0.25)' }
+        : { background: 'rgba(57,58,57,0.3)', border: '1px solid rgba(255,255,255,0.06)' }
       }
     >
       <span className="relative flex h-2 w-2">
-        {isRunning && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
-        <span className={`relative inline-flex rounded-full h-2 w-2 ${isRunning ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+        {isRunning && <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#00FF59' }} />}
+        <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: isRunning ? '#00FF59' : '#3a3a3a' }} />
       </span>
-      <span className={`text-xs font-semibold ${isRunning ? 'text-emerald-400' : 'text-slate-400'}`}>{status}</span>
+      <span className="text-xs font-semibold tracking-wide" style={{ color: isRunning ? '#00FF59' : '#5a605c', fontFamily: 'Space Grotesk' }}>{status}</span>
     </div>
   );
 }
@@ -198,8 +211,12 @@ function StatusBadge({ isRunning, status }) {
 function Panel({ children, className = '' }) {
   return (
     <div
-      className={`rounded-2xl border border-white/[0.06] overflow-hidden ${className}`}
-      style={{ background: 'rgba(10,16,30,0.85)', backdropFilter: 'blur(16px)' }}
+      className={`rounded-2xl overflow-hidden ${className}`}
+      style={{
+        background: '#131513',
+        border: '1px solid rgba(0,255,89,0.06)',
+        boxShadow: '0 4px 32px rgba(0,0,0,0.5)'
+      }}
     >
       {children}
     </div>
@@ -209,10 +226,10 @@ function Panel({ children, className = '' }) {
 // ─── PANEL HEADER ─────────────────────────────────────
 function PanelHeader({ icon, title, right }) {
   return (
-    <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+    <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(0,255,89,0.06)' }}>
       <div className="flex items-center gap-2.5">
-        <span className="text-slate-400">{icon}</span>
-        <h2 className="text-sm font-bold text-white tracking-wide">{title}</h2>
+        <span style={{ color: '#00FF59', opacity: 0.8 }}>{icon}</span>
+        <h2 style={{ fontSize: 13, fontWeight: 700, color: '#F2F5F9', letterSpacing: '0.04em', fontFamily: 'Space Grotesk' }}>{title}</h2>
       </div>
       {right}
     </div>
@@ -240,14 +257,14 @@ function LiveTerminal({ logs, title = 'Live Activity', showAIToggle, showAITermi
                 >A.I. Brain</button>
               </div>
             )}
-            <span className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 bg-slate-950/60 px-2.5 py-1 rounded-full border border-white/5">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              Real-time
+            <span className="flex items-center gap-1.5" style={{ fontSize: 10, fontWeight: 600, color: '#5a605c', background: 'rgba(0,0,0,0.4)', padding: '3px 10px', borderRadius: 99, border: '1px solid rgba(255,255,255,0.04)', fontFamily: 'Space Grotesk' }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#00FF59' }} />
+              LIVE
             </span>
           </div>
         }
       />
-      <div className="flex-1 min-h-0 relative bg-[#070d1a] m-3 rounded-xl border border-white/5">
+      <div className="flex-1 min-h-0 relative m-3 rounded-xl" style={{ background: '#000', border: '1px solid rgba(0,255,89,0.1)' }}>
         <div className="absolute inset-0 p-3">
           <LogViewer logs={logs} />
         </div>
@@ -369,7 +386,7 @@ function App() {
   const groups = { overview: 'Visão Geral', platforms: 'Plataformas' };
 
   return (
-    <div className="flex h-screen overflow-hidden text-slate-200" style={{ background: '#060c18', fontFamily: "'Inter', 'Space Grotesk', sans-serif" }}>
+    <div className="flex h-screen overflow-hidden" style={{ background: '#000000', fontFamily: "'Space Grotesk', 'Inter', sans-serif", color: '#F2F5F9' }}>
 
       <GlobalSettingsModal
         isOpen={isGlobalSettingsOpen}
@@ -378,27 +395,27 @@ function App() {
       />
 
       {/* ════ SIDEBAR ════ */}
-      <aside className="w-60 shrink-0 flex flex-col border-r border-white/[0.05] relative z-20" style={{ background: 'rgba(4,8,20,0.95)', backdropFilter: 'blur(20px)' }}>
+      <aside className="w-60 shrink-0 flex flex-col relative z-20" style={{ background: '#0a0b0a', borderRight: '1px solid rgba(0,255,89,0.07)' }}>
 
         {/* Brand */}
-        <div className="px-5 pt-6 pb-5 border-b border-white/[0.05]">
+        <div className="px-5 pt-6 pb-5" style={{ borderBottom: '1px solid rgba(0,255,89,0.07)' }}>
           <div className="flex items-center gap-3">
             <BrowzeLogo />
             <div>
-              <p className="text-[15px] font-bold text-white leading-tight tracking-tight">Browze AI</p>
-              <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-emerald-500 mt-0.5">Automation Suite</p>
+              <p style={{ fontSize: 15, fontWeight: 800, color: '#F2F5F9', lineHeight: 1.2, letterSpacing: '-0.01em', fontFamily: 'Space Grotesk' }}>Browze Bot</p>
+              <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', color: '#00FF59', marginTop: 3, fontFamily: 'Space Grotesk' }}>Automation Suite</p>
             </div>
           </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5 custom-scrollbar">
+        <nav className="flex-1 overflow-y-auto py-4 px-3 custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {Object.entries(groups).map(([groupId, groupLabel]) => {
             const items = NAV.filter(n => n.group === groupId);
             return (
               <div key={groupId}>
-                <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-600">{groupLabel}</p>
-                <div className="space-y-0.5">
+                <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#3a403c', paddingLeft: 12, marginBottom: 6, fontFamily: 'Space Grotesk' }}>{groupLabel}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {items.map(item => (
                     <NavItem key={item.id} item={item} active={activeTab === item.id} onClick={() => setActiveTab(item.id)} />
                   ))}
@@ -409,12 +426,15 @@ function App() {
         </nav>
 
         {/* Bottom: Settings */}
-        <div className="p-3 border-t border-white/[0.05]">
+        <div className="p-3" style={{ borderTop: '1px solid rgba(0,255,89,0.07)' }}>
           <button
             onClick={() => setIsGlobalSettingsOpen(true)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-white hover:bg-white/5 transition-all group"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group"
+            style={{ fontSize: 13, fontWeight: 500, color: '#3a403c', border: '1px solid transparent', fontFamily: 'Space Grotesk' }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#F2F5F9'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#3a403c'; e.currentTarget.style.background = 'transparent'; }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-4.5 h-4.5 group-hover:rotate-45 transition-transform duration-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-4.5 h-4.5 group-hover:rotate-45 transition-transform duration-300" style={{ opacity: 0.5 }}>
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
@@ -426,24 +446,24 @@ function App() {
       {/* ════ MAIN ════ */}
       <div className="flex-1 flex flex-col min-w-0 relative overflow-hidden">
 
-        {/* Dynamic glow */}
+        {/* Brand ambient glow */}
         <div className="absolute inset-0 pointer-events-none -z-10 overflow-hidden">
           <div
-            className="absolute -top-32 -left-32 w-[600px] h-[600px] rounded-full blur-[120px] opacity-30 transition-all duration-1000"
-            style={{ background: `radial-gradient(circle, ${theme.glow} 0%, transparent 70%)` }}
+            className="absolute -top-40 -right-20 w-[500px] h-[500px] rounded-full transition-all duration-1000"
+            style={{ background: 'radial-gradient(circle, rgba(0,255,89,0.06) 0%, transparent 65%)', filter: 'blur(60px)' }}
           />
           <div
-            className="absolute -bottom-32 -right-32 w-[500px] h-[500px] rounded-full blur-[120px] opacity-20 transition-all duration-1000"
-            style={{ background: `radial-gradient(circle, ${theme.glow} 0%, transparent 70%)` }}
+            className="absolute -bottom-40 -left-20 w-[400px] h-[400px] rounded-full transition-all duration-1000"
+            style={{ background: 'radial-gradient(circle, rgba(78,255,170,0.04) 0%, transparent 65%)', filter: 'blur(60px)' }}
           />
         </div>
 
         {/* Top Bar */}
-        <header className="h-16 shrink-0 flex items-center justify-between px-6 border-b border-white/[0.05] z-10" style={{ background: 'rgba(6,12,24,0.8)', backdropFilter: 'blur(20px)' }}>
+        <header className="h-14 shrink-0 flex items-center justify-between px-6 z-10" style={{ background: 'rgba(0,0,0,0.7)', borderBottom: '1px solid rgba(0,255,89,0.07)', backdropFilter: 'blur(20px)' }}>
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-base font-bold text-white">{theme.label}</h1>
-              <p className="text-[11px] text-slate-500">Browze AI — Automation Suite</p>
+              <h1 style={{ fontSize: 14, fontWeight: 700, color: '#F2F5F9', letterSpacing: '0.02em', fontFamily: 'Space Grotesk' }}>{theme.label}</h1>
+              <p style={{ fontSize: 10, color: '#3a403c', letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'Space Grotesk' }}>Browze Bot — Automation Suite</p>
             </div>
           </div>
 

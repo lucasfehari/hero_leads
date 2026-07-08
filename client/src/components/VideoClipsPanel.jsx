@@ -282,6 +282,12 @@ export default function VideoClipsPanel({ socket }) {
   const [removeFillers, setRemoveFillers] = useState(true);
   const [advancedEditing, setAdvancedEditing] = useState(false); // AI stitches multiple segments
 
+  // Retention Editing
+  const [retentionEdit, setRetentionEdit] = useState(false);
+  const [retentionSilenceThreshold, setRetentionSilenceThreshold] = useState(0.4);
+  const [retentionRemoveBreaths, setRetentionRemoveBreaths] = useState(true);
+  const [retentionDetectErrors, setRetentionDetectErrors] = useState(true);
+
   // Subtitle style
   const [subtitleStyle, setSubtitleStyle] = useState({
     position: 'middle-center', fontSize: 'large',
@@ -590,7 +596,10 @@ export default function VideoClipsPanel({ socket }) {
           // Smart processing
           snapWords,
           removeFillers,
-          advancedEditing,
+          retentionEdit,
+          retentionSilenceThreshold,
+          retentionRemoveBreaths,
+          retentionDetectErrors,
           subtitleStyle: burnSubtitles ? subtitleStyle : undefined,
         })
       });
@@ -1076,6 +1085,49 @@ export default function VideoClipsPanel({ socket }) {
             <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
               ✨ Processamento Inteligente
             </p>
+
+            <div className="bg-slate-900/60 border border-white/10 rounded-xl p-3.5 mb-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-white flex items-center gap-1.5">
+                  <span className="text-emerald-400 font-bold">▶</span> Alta Retenção (Retention Edit)
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Remove espaços mortos, respirações e erros antes de cortar.</p>
+              </div>
+              <button
+                onClick={() => setRetentionEdit(p => !p)}
+                className={`relative w-10 h-5 rounded-full transition-all ${retentionEdit ? 'bg-emerald-500' : 'bg-slate-700'}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${retentionEdit ? 'left-5' : 'left-0.5'}`}/>
+              </button>
+            </div>
+
+            {retentionEdit && (
+              <div className="pt-2 border-t border-white/10 space-y-3">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[10px] text-slate-400">Cortar silêncios acima de:</label>
+                    <span className="text-[10px] font-bold text-white">{retentionSilenceThreshold.toFixed(1)}s</span>
+                  </div>
+                  <input type="range" min="0.2" max="1.5" step="0.1" value={retentionSilenceThreshold} onChange={e => setRetentionSilenceThreshold(Number(e.target.value))} className="w-full accent-emerald-500"/>
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-300">Remover respirações</span>
+                  <input type="checkbox" checked={retentionRemoveBreaths} onChange={e => setRetentionRemoveBreaths(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5"/>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-300">IA corrigir erros/repetições</span>
+                  <input type="checkbox" checked={retentionDetectErrors} onChange={e => setRetentionDetectErrors(e.target.checked)} className="accent-emerald-500 w-3.5 h-3.5"/>
+                </div>
+
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-2 text-[10px] text-emerald-400">
+                  ⚠️ Essa edição será feita no vídeo <b>antes</b> da seleção de clips. Vídeos longos podem demorar de 1 a 2 minutos extras.
+                </div>
+              </div>
+            )}
+          </div>
 
             {/* Snap to word boundaries */}
             <div className="flex items-center justify-between">

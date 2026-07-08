@@ -131,6 +131,8 @@ const WhatsAppDashboard = () => {
     const [sessions, setSessions] = useState([]);
     const [showAdd, setShowAdd] = useState(false);
     const [renaming, setRenaming] = useState(null);
+    const [isPoweredOn, setIsPoweredOn] = useState(false);
+    const [powerLoading, setPowerLoading] = useState(false);
 
     const fetchSessions = async () => {
         try {
@@ -138,6 +140,7 @@ const WhatsAppDashboard = () => {
             const data = await res.json();
             setSessions(data.sessions || []);
             setActiveSession(data.current);
+            setIsPoweredOn(data.isPoweredOn);
         } catch { /* ignore */ }
     };
 
@@ -145,15 +148,25 @@ const WhatsAppDashboard = () => {
         fetchSessions();
 
         socket.on('wa-status', (data) => {
+            if (data.status === 'power_off') {
+                setStatus('disconnected');
+                setIsPoweredOn(false);
+                setQrCode('');
+                return;
+            }
             setStatus(data.status);
             if (data.phone) setActivePhone(data.phone);
             if (data.status === 'connected' || data.status === 'authenticated') {
+                setIsPoweredOn(true);
                 setQrCode('');
                 fetchSessions();
+            } else if (data.status === 'connecting') {
+                setIsPoweredOn(true);
             }
         });
 
         socket.on('wa-qr', (qr) => {
+            setIsPoweredOn(true);
             setQrCode(qr);
             setStatus('scan_qr');
         });
@@ -163,6 +176,25 @@ const WhatsAppDashboard = () => {
             socket.off('wa-qr');
         };
     }, []);
+
+    const togglePower = async () => {
+        setPowerLoading(true);
+        try {
+            if (isPoweredOn) {
+                await fetch('/api/whatsapp/power-off', { method: 'POST' });
+                setStatus('disconnected');
+                setIsPoweredOn(false);
+                setQrCode('');
+            } else {
+                setStatus('connecting');
+                setIsPoweredOn(true);
+                await fetch('/api/whatsapp/power-on', { method: 'POST' });
+            }
+        } catch (e) {
+            console.error('Toggle power error:', e);
+        }
+        setPowerLoading(false);
+    };
 
     const switchTo = async (name) => {
         await fetch('/api/whatsapp/sessions/switch', {
@@ -189,24 +221,46 @@ const WhatsAppDashboard = () => {
             <div className="bg-slate-900/60 border border-white/5 rounded-2xl p-5">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-white font-bold flex items-center gap-2 text-base">
-                        <Smartphone className="w-5 h-5 text-green-500" /> WhatsApp — Sessão Ativa
+                        <Smartphone className="w-5 h-5 text-green-500" /> Motor do WhatsApp
                     </h2>
-                    <StatusDot status={status} />
+                    
+                    <button 
+                        onClick={togglePower}
+                        disabled={powerLoading}
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                            isPoweredOn 
+                                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
+                                : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                        } disabled:opacity-50`}
+                    >
+                        {powerLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                        {!powerLoading && (isPoweredOn ? 'Desligar Robô' : 'Ligar Robô')}
+                    </button>
                 </div>
 
-                {isConnected ? (
+                {!isPoweredOn ? (
+                    <div className="flex flex-col items-center justify-center gap-2 py-8 text-slate-500">
+                        <WifiOff className="w-8 h-8 opacity-50" />
+                        <span className="text-sm">WhatsApp desligado para economizar memória.</span>
+                        <span className="text-xs">Clique em "Ligar Robô" para conectar e enviar mensagens.</span>
+                    </div>
+                ) : isConnected ? (
                     <div className="flex items-center gap-4 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
                         <div className="w-12 h-12 bg-emerald-500/15 rounded-full flex items-center justify-center shrink-0">
                             <Wifi className="w-6 h-6 text-emerald-400" />
                         </div>
-                        <div>
-                            <p className="text-emerald-400 font-semibold text-sm">Conectado e Pronto</p>
+                        <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                                <p className="text-emerald-400 font-semibold text-sm">Conectado e Pronto</p>
+                                <StatusDot status={status} />
+                            </div>
                             {activePhone && <p className="text-slate-400 text-xs font-mono mt-0.5">{activePhone}</p>}
                             <p className="text-slate-600 text-xs mt-0.5">Sessão: <span className="text-slate-400">{activeSession}</span></p>
                         </div>
                     </div>
                 ) : qrCode ? (
                     <div className="flex flex-col items-center gap-3">
+                        <div className="w-full flex justify-end mb-1"><StatusDot status={status} /></div>
                         <div className="bg-white p-3 rounded-xl inline-block">
                             <QRCode value={qrCode} size={220} />
                         </div>
@@ -217,7 +271,7 @@ const WhatsAppDashboard = () => {
                 ) : (
                     <div className="flex items-center justify-center gap-3 py-8 text-slate-500">
                         <RefreshCw className="w-5 h-5 animate-spin" />
-                        <span className="text-sm">Inicializando cliente WhatsApp...</span>
+                        <span className="text-sm">Inicializando navegador oculto do WhatsApp...</span>
                     </div>
                 )}
             </div>
