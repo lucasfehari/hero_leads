@@ -1,12 +1,20 @@
 const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
-const { autoUpdater } = require('electron-updater');
 const https = require('https');
 const http = require('http');
 const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
+
+// autoUpdater only works inside the Electron runtime
+let autoUpdater = null;
+try {
+    const updater = require('electron-updater');
+    autoUpdater = updater.autoUpdater;
+} catch (e) {
+    console.log('[Updater] electron-updater not available in this environment.');
+}
 
 let mainWindow;
 let licenseWindow;
@@ -204,7 +212,7 @@ ipcMain.handle('license-valid', async (event, key, data) => {
     startServer();
     setTimeout(() => {
         createMainWindow();
-        if (app.isPackaged) autoUpdater.checkForUpdatesAndNotify();
+        if (app.isPackaged && autoUpdater) autoUpdater.checkForUpdatesAndNotify();
     }, 2000);
 });
 
@@ -268,17 +276,19 @@ app.on('before-quit', () => {
 // ─────────────────────────────────────────────────────────────────
 // Auto Updater
 // ─────────────────────────────────────────────────────────────────
-autoUpdater.on('update-available', () => {
-    console.log('[Updater] Atualização disponível. Baixando...');
-});
-
-autoUpdater.on('update-downloaded', () => {
-    dialog.showMessageBox({
-        type: 'info',
-        title: 'Atualização Pronta',
-        message: 'Uma nova versão do Browze Bot está pronta. Deseja reiniciar para atualizar agora?',
-        buttons: ['Reiniciar Agora', 'Depois'],
-    }).then(result => {
-        if (result.response === 0) autoUpdater.quitAndInstall();
+if (autoUpdater) {
+    autoUpdater.on('update-available', () => {
+        console.log('[Updater] Atualização disponível. Baixando...');
     });
-});
+
+    autoUpdater.on('update-downloaded', () => {
+        dialog.showMessageBox({
+            type: 'info',
+            title: 'Atualização Pronta',
+            message: 'Uma nova versão do Browze Bot está pronta. Deseja reiniciar para atualizar agora?',
+            buttons: ['Reiniciar Agora', 'Depois'],
+        }).then(result => {
+            if (result.response === 0) autoUpdater.quitAndInstall();
+        });
+    });
+}
