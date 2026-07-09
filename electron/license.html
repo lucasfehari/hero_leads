@@ -53,6 +53,7 @@
       max-width: 95vw;
       text-align: center;
       box-shadow: 0 0 80px rgba(99,102,241,0.12);
+      transition: all 0.3s ease;
     }
     .logo { font-size: 3rem; margin-bottom: 4px; }
     h1 {
@@ -81,11 +82,23 @@
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    .key-input:focus {
+    .text-input {
+      width: 100%;
+      padding: 14px 18px;
+      background: rgba(99,102,241,0.06);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .key-input:focus, .text-input:focus {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
     }
-    .key-input::placeholder { color: rgba(148,163,184,0.4); letter-spacing: 0; font-family: 'Inter', sans-serif; }
+    .key-input::placeholder, .text-input::placeholder { color: rgba(148,163,184,0.4); letter-spacing: 0; font-family: 'Inter', sans-serif; }
     .btn-activate {
       width: 100%;
       padding: 15px;
@@ -122,6 +135,28 @@
     .buy-link a { color: #818cf8; text-decoration: none; font-weight: 600; }
     .buy-link a:hover { text-decoration: underline; }
     .machine-id { font-size: 10px; color: rgba(148,163,184,0.35); margin-top: 24px; font-family: monospace; }
+    
+    /* Etapas */
+    #step-profile { display: none; animation: fadeIn 0.4s ease forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    
+    /* Upload Foto */
+    .photo-upload {
+      display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 24px;
+    }
+    .photo-preview {
+      width: 90px; height: 90px;
+      border-radius: 50%;
+      background: rgba(99,102,241,0.1);
+      border: 2px dashed var(--border);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--primary); font-size: 24px; cursor: pointer;
+      overflow: hidden; transition: all 0.2s; position: relative;
+    }
+    .photo-preview:hover { border-color: var(--primary); background: rgba(99,102,241,0.15); }
+    .photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+    .photo-preview span { position: absolute; font-size: 11px; text-transform: uppercase; font-weight: 700; opacity: 0; transition: opacity 0.2s; background: rgba(0,0,0,0.6); inset: 0; display: flex; align-items: center; justify-content: center; color: white; }
+    .photo-preview:hover span { opacity: 1; }
   </style>
 </head>
 <body>
@@ -130,46 +165,86 @@
     <div class="orb orb-2"></div>
   </div>
 
-  <div class="card">
-    <div class="logo">⚡</div>
-    <h1>Browze Bot</h1>
-    <p class="subtitle">Insira sua chave de licença para ativar</p>
+  <div class="card" id="cardContainer">
+    
+    <!-- ETAPA 1: CHAVE -->
+    <div id="step-key">
+      <div class="logo">⚡</div>
+      <h1>Browze Bot</h1>
+      <p class="subtitle">Insira sua chave de licença para ativar</p>
 
-    <div class="input-wrap">
-      <label>Chave de Licença</label>
-      <input
-        class="key-input"
-        type="text"
-        id="licenseKey"
-        placeholder="BROWZE-XXXX-XXXX-XXXX-XXXX"
-        maxlength="29"
-        autocomplete="off"
-        spellcheck="false"
-      >
+      <div class="input-wrap">
+        <label>Chave de Licença</label>
+        <input
+          class="key-input"
+          type="text"
+          id="licenseKey"
+          placeholder="BROWZE-XXXX-XXXX-XXXX-XXXX"
+          maxlength="29"
+          autocomplete="off"
+          spellcheck="false"
+        >
+      </div>
+
+      <button class="btn-activate" id="activateBtn" onclick="activate()">
+        <span>Ativar Licença</span>
+        <span>→</span>
+      </button>
+
+      <div class="status" id="statusEl"></div>
+
+      <div class="divider"></div>
+
+      <div class="buy-link">
+        Não tem uma licença?
+        <a href="https://browzebot.com.br" onclick="openExternal(event, 'https://browzebot.com.br')">Adquira aqui →</a>
+      </div>
+
+      <div class="machine-id" id="machineIdEl"></div>
     </div>
 
-    <button class="btn-activate" id="activateBtn" onclick="activate()">
-      <span>Ativar Licença</span>
-      <span>→</span>
-    </button>
+    <!-- ETAPA 2: PERFIL -->
+    <div id="step-profile">
+      <div class="logo">👤</div>
+      <h1>Seu Perfil</h1>
+      <p class="subtitle">Configure como você aparecerá no app</p>
 
-    <div class="status" id="statusEl"></div>
+      <div class="photo-upload">
+        <label class="photo-preview" id="photoPreviewLabel">
+          <input type="file" id="photoInput" accept="image/png, image/jpeg, image/jpg" style="display: none;" onchange="handlePhotoChange(event)">
+          <div id="photoPlaceholder">📸</div>
+          <span>Alterar</span>
+        </label>
+        <div style="font-size: 11px; color: var(--muted);">Clique para enviar sua foto (Opcional)</div>
+      </div>
 
-    <div class="divider"></div>
+      <div class="input-wrap">
+        <label>Seu Nome / Empresa</label>
+        <input
+          class="text-input"
+          type="text"
+          id="profileName"
+          placeholder="Ex: João Silva"
+          autocomplete="off"
+        >
+      </div>
 
-    <div class="buy-link">
-      Não tem uma licença?
-      <a href="https://browzebot.com.br" onclick="openExternal(event, 'https://browzebot.com.br')">Adquira aqui →</a>
+      <button class="btn-activate" id="finishBtn" onclick="finishSetup()">
+        <span>Entrar no Browze Bot</span>
+        <span>→</span>
+      </button>
     </div>
 
-    <div class="machine-id" id="machineIdEl"></div>
   </div>
 
   <script>
-    // Formata a chave automaticamente enquanto digita
+    let globalKey = '';
+    let globalResult = null;
+    let photoBase64 = null;
+
+    // ----- ETAPA 1 -----
     document.getElementById('licenseKey').addEventListener('input', function () {
       let val = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      // Adiciona prefixo BROWZE se começou digitando sem ele
       let parts = [];
       if (val.startsWith('BROWZE')) {
         val = val.slice(6).replace(/^-/, '');
@@ -204,12 +279,26 @@
       btn.disabled = true;
       showStatus('Verificando licença...', 'loading');
 
-      // Chama o processo Electron via IPC
       try {
         const result = await window.electronAPI.validateLicense(key);
         if (result.valid) {
-          showStatus('✓ Licença ativada com sucesso! Abrindo o app...', 'success');
-          setTimeout(() => window.electronAPI.licenseValid(key, result), 1500);
+          showStatus('✓ Licença ativada! Avançando...', 'success');
+          
+          globalKey = key;
+          globalResult = result;
+          
+          // Pre-preenche o nome se o banco retornou (caso já exista no banco Turso)
+          if (result.name) {
+             document.getElementById('profileName').value = result.name;
+          } else if (result.email) {
+             document.getElementById('profileName').value = result.email.split('@')[0];
+          }
+
+          setTimeout(() => {
+            document.getElementById('step-key').style.display = 'none';
+            document.getElementById('step-profile').style.display = 'block';
+          }, 1000);
+          
         } else {
           showStatus(`❌ ${result.error || 'Licença inválida'}`, 'error');
           btn.disabled = false;
@@ -220,12 +309,45 @@
       }
     }
 
+    // ----- ETAPA 2 -----
+    document.getElementById('profileName').addEventListener('keydown', e => {
+      if (e.key === 'Enter') finishSetup();
+    });
+
+    function handlePhotoChange(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        photoBase64 = event.target.result;
+        const ph = document.getElementById('photoPlaceholder');
+        ph.innerHTML = `<img src="${photoBase64}" alt="Perfil">`;
+        ph.style.width = '100%';
+        ph.style.height = '100%';
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function finishSetup() {
+      const name = document.getElementById('profileName').value.trim() || 'Usuário';
+      const btn = document.getElementById('finishBtn');
+      btn.disabled = true;
+      btn.innerHTML = `<div class="spinner"></div><span>Carregando...</span>`;
+
+      // Prepara o objeto de perfil
+      const profile = { name, photo: photoBase64 };
+
+      // Passa a chave, o resultado e o perfil para o Main Process
+      window.electronAPI.licenseValid(globalKey, globalResult, profile);
+    }
+
+    // ----- UTILITÁRIOS -----
     function openExternal(e, url) {
       e.preventDefault();
       window.electronAPI?.openExternal(url);
     }
 
-    // Exibe o machine ID para suporte
     window.addEventListener('DOMContentLoaded', async () => {
       try {
         const id = await window.electronAPI?.getMachineId();

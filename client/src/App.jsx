@@ -12,6 +12,8 @@ import ThreadsConfigForm from './components/ThreadsConfigForm';
 import GlobalSettingsModal from './components/GlobalSettingsModal';
 import DashboardPanel from './components/DashboardPanel';
 import VideoClipsPanel from './components/VideoClipsPanel';
+import ProfileModal from './components/ProfileModal';
+import LockScreen from './components/LockScreen';
 
 const socket = io('http://localhost:3000');
 
@@ -287,6 +289,9 @@ function App() {
   const [waPrefillLeads, setWaPrefillLeads] = useState([]);
   const [showAITerminal, setShowAITerminal] = useState(false);
   const [isGlobalSettingsOpen, setIsGlobalSettingsOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
 
   const theme = THEME[activeTab] || THEME.instagram;
 
@@ -295,6 +300,26 @@ function App() {
     setWaPrefillNumbers(numbersStr);
     setWaPrefillLeads(leads);
   };
+
+  useEffect(() => {
+    async function loadProfile() {
+      if (window.electronAPI) {
+        try {
+          const data = await window.electronAPI.getProfile();
+          if (data) {
+            setProfile(data);
+            if (data.data?.expires_at) {
+              const expires = new Date(data.data.expires_at);
+              if (expires < new Date()) {
+                setIsLocked(true);
+              }
+            }
+          }
+        } catch (err) {}
+      }
+    }
+    loadProfile();
+  }, []);
 
   useEffect(() => {
     socket.on('connect', () => addLog('Connected to backend server.', 'info'));
@@ -394,6 +419,14 @@ function App() {
         onSave={() => setIsGlobalSettingsOpen(false)}
       />
 
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        profile={profile}
+      />
+
+      {isLocked && <LockScreen profile={profile} />}
+
       {/* ════ SIDEBAR ════ */}
       <aside className="w-60 shrink-0 flex flex-col relative z-20" style={{ background: '#0a0b0a', borderRight: '1px solid rgba(0,255,89,0.07)' }}>
 
@@ -426,7 +459,7 @@ function App() {
         </nav>
 
         {/* Bottom: Settings */}
-        <div className="p-3" style={{ borderTop: '1px solid rgba(0,255,89,0.07)' }}>
+        <div className="p-3 flex flex-col gap-1" style={{ borderTop: '1px solid rgba(0,255,89,0.07)' }}>
           <button
             onClick={() => setIsGlobalSettingsOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group"
@@ -439,6 +472,21 @@ function App() {
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
             Global Settings
+          </button>
+          
+          <button
+            onClick={() => setIsProfileModalOpen(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group"
+            style={{ fontSize: 13, fontWeight: 500, color: '#3a403c', border: '1px solid transparent', fontFamily: 'Space Grotesk' }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#F2F5F9'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#3a403c'; e.currentTarget.style.background = 'transparent'; }}
+          >
+            {profile?.profile?.photo ? (
+              <img src={profile.profile.photo} className="w-5 h-5 rounded-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" alt="Profile" />
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4.5 h-4.5 opacity-50 group-hover:opacity-100 transition-opacity"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+            )}
+            <span className="truncate">{profile?.profile?.name || 'Meu Perfil'}</span>
           </button>
         </div>
       </aside>

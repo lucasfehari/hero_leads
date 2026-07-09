@@ -3,9 +3,8 @@ const MessageQueue = require('./queue');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
-
-const SESSIONS_DIR = path.join(require('os').homedir(), '.browzebot', '../../whatsapp_sessions');
-const DB_PATH = path.join(require('os').homedir(), '.browzebot', '../../whatsapp_sessions/wa_sessions_meta.db');
+const SESSIONS_DIR = path.join(require('os').homedir(), '.browzebot', 'whatsapp_sessions');
+const DB_PATH = path.join(require('os').homedir(), '.browzebot', 'whatsapp_sessions/wa_sessions_meta.db');
 
 // ── SQLite metadata for WA sessions ──────────────────────────────────────────
 // We can't store the FULL session (it's Chromium state) but we CAN store display metadata

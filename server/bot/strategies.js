@@ -49,7 +49,11 @@ const parseAIJson = (text) => {
     const objMatch = t.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (objMatch) t = objMatch[0];
 
-    return JSON.parse(t);
+    try {
+        return JSON.parse(t);
+    } catch (err) {
+        throw new Error(`${err.message} | RAW: ${t.substring(0, 150)}...`);
+    }
 };
 
 /**
@@ -74,7 +78,12 @@ const callAIWithRetry = async (payload, apiKey, retries = 3) => {
             if (res.status === 429 || res.status >= 500) {
                 throw new Error(`API HTTP ${res.status}`);
             }
-            return await res.json();
+            
+            const data = await res.json();
+            if (data.error) {
+                throw new Error(`OpenRouter Error: ${data.error.message || JSON.stringify(data.error)}`);
+            }
+            return data;
         } catch (e) {
             lastError = e;
             if (attempt < retries - 1) {
@@ -140,7 +149,7 @@ Responda APENAS com JSON válido (sem markdown, sem texto extra):
                 { role: 'user', content: `Objetivo da Prospecção:\n"${prompt}"` }
             ],
             temperature: 0.7,
-            max_tokens: 400
+            max_tokens: 1000
         }, apiKey);
 
         if (data.choices?.[0]?.message?.content) {
@@ -369,7 +378,7 @@ Bio: ${bioStub}`;
                     { role: 'user', content: userMessage }
                 ],
                 temperature: 0.3, // Lower = more consistent JSON output
-                max_tokens: 500
+                max_tokens: 1500
             }, config.openRouterKey);
 
             if (data.choices?.[0]?.message?.content) {
@@ -531,7 +540,7 @@ const exploreReels = async (page, keywords, logCallback, excludedKeywords = [], 
                 const authorLink = links.find(a => {
                     const href = a.getAttribute('href');
                     if (!href) return false;
-                    const systemPaths = ['/explore/', '/audio/', '/reels/', '/p/', '/stories/', '/direct/', '/accounts/', '/legal/', '/hashtag/'];
+                    const systemPaths = ['/explore/', '/audio/', '/reels/', '/p/', '/stories/', '/direct/', '/accounts/', '/legal/', '/hashtag/', '/notifications/', '/messages/'];
                     if (systemPaths.some(s => href.includes(s))) return false;
                     const parts = href.split('/').filter(Boolean);
                     return parts.length === 1 && /^[a-zA-Z0-9_.]+$/.test(parts[0]);

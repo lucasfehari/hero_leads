@@ -37,8 +37,14 @@ function getMachineId() {
 }
 
 // Salva licença localmente (cache)
-function saveLicenseCache(key, data) {
-    const payload = { key, data, cachedAt: Date.now() };
+function saveLicenseCache(key, data, profile = null) {
+    const payload = { key, data, profile, cachedAt: Date.now() };
+    if (!profile) {
+        const oldCache = readLicenseCache();
+        if (oldCache && oldCache.profile) {
+            payload.profile = oldCache.profile;
+        }
+    }
     fs.writeFileSync(licenseCachePath, JSON.stringify(payload), 'utf8');
 }
 
@@ -123,6 +129,7 @@ function createMainWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js'),
         },
         icon: path.join(__dirname, '../build/icon.png'),
         title: 'Browze Bot',
@@ -203,7 +210,12 @@ ipcMain.handle('validate-license', async (event, key) => {
     }
 });
 
-ipcMain.handle('license-valid', async (event, key, data) => {
+ipcMain.handle('license-valid', async (event, key, data, profile) => {
+    // Salva o perfil e licença antes de continuar
+    if (profile) {
+        saveLicenseCache(key, data, profile);
+    }
+    
     // Fecha a janela de licença e abre o app principal
     if (licenseWindow) {
         licenseWindow.close();
@@ -217,6 +229,8 @@ ipcMain.handle('license-valid', async (event, key, data) => {
 });
 
 ipcMain.handle('get-machine-id', () => getMachineId());
+
+ipcMain.handle('get-profile', () => readLicenseCache());
 
 ipcMain.handle('open-external', (event, url) => {
     shell.openExternal(url);

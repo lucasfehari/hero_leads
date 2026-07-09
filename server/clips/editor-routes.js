@@ -22,7 +22,7 @@ const db = require('./db');
 const { generateSmartCaptions, buildAssHeader, toAssTime } = require('./subtitles');
 
 // ── Dirs ──────────────────────────────────────────────────────────────────────
-const EDITOR_DIR = path.join(require('os').homedir(), '.browzebot', '../uploads/editor');
+const EDITOR_DIR = path.join(require('os').homedir(), '.browzebot', 'uploads/editor');
 const EDITOR_EXPORT_DIR = path.join(EDITOR_DIR, 'exports');
 [EDITOR_DIR, EDITOR_EXPORT_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
@@ -61,7 +61,7 @@ const FILLERS = new Set([
 
 // ── Transcribe (shared with routes.js pattern) ─────────────────────────────────
 const TRANSCRIBE_PY = path.join(require('os').homedir(), '.browzebot', 'transcribe.py');
-const SUBS_DIR = path.join(require('os').homedir(), '.browzebot', '../uploads/clips/subs');
+const SUBS_DIR = path.join(require('os').homedir(), '.browzebot', 'uploads/clips/subs');
 if (!fs.existsSync(SUBS_DIR)) fs.mkdirSync(SUBS_DIR, { recursive: true });
 
 function transcribeLocalAudio(audioPath, modelSize = 'small', io) {

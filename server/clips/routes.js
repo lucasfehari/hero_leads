@@ -10,7 +10,7 @@ const { generateAssFile, generateAssFromSegments, generatePlaceholderAss } = req
 const { runRetentionPipeline } = require('./retention');
 
 // ── Dirs ──────────────────────────────────────────────────────────────────────
-const CLIPS_DIR = path.join(require('os').homedir(), '.browzebot', '../uploads/clips');
+const CLIPS_DIR = path.join(require('os').homedir(), '.browzebot', 'uploads/clips');
 const THUMBS_DIR = path.join(CLIPS_DIR, 'thumbs');
 const YT_DIR = path.join(CLIPS_DIR, 'yt');
 const SUBS_DIR = path.join(CLIPS_DIR, 'subs');
@@ -239,7 +239,7 @@ async function buildFFmpegArgs(opts) {
         const sqY = Math.max(0, wcY + Math.round((wcH - squareSide) / 2));
 
         // Generate masks for alphamerge (super fast instead of geq per frame)
-        const maskDir = path.join(require('os').homedir(), '.browzebot', '../../uploads/frames');
+        const maskDir = path.join(require('os').homedir(), '.browzebot', 'uploads/frames');
         if (!fs.existsSync(maskDir)) fs.mkdirSync(maskDir, { recursive: true });
 
         if (aspectRatio === '9:16') {

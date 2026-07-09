@@ -128,7 +128,7 @@ app.post("/api/profiles/login", async (req, res) => {
     await client.send("Network.clearBrowserCookies");
     await client.send("Network.clearBrowserCache");
     await page.goto("https://www.instagram.com/accounts/login/", {
-      waitUntil: "networkidle2",
+      waitUntil: "domcontentloaded",
     });
 
     console.log(`[System] Waiting for user to login to ${name}...`);

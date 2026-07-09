@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SESSIONS_DIR = path.join(require('os').homedir(), '.browzebot', '../../whatsapp_sessions');
+const SESSIONS_DIR = path.join(require('os').homedir(), '.browzebot', 'whatsapp_sessions');
 
 // Cada sessão tem sua própria pasta: whatsapp_sessions/session-<name>/
 function sessionDir(sessionName) {
