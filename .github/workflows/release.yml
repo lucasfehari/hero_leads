@@ -1,0 +1,59 @@
+name: Build & Release Browze Bot
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Rebuild native modules for Electron
+        run: npx @electron/rebuild -f -w better-sqlite3 --module-dir server
+        env:
+          npm_config_target: '33.2.1'
+          npm_config_arch: x64
+          npm_config_target_arch: x64
+          npm_config_disturl: 'https://electronjs.org/headers'
+          npm_config_runtime: electron
+          npm_config_build_from_source: true
+
+      - name: Build client (Vite)
+        run: npm run build
+        working-directory: client
+
+      - name: Build & Publish Windows installer
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: BrowzeBot-Windows-Installer
+          path: bin/*.exe
+          retention-days: 30

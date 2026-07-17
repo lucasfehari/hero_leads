@@ -63,3 +63,17 @@ server/instagram/uploads/*
 bin/
 fix_mkdir.js
 fix_paths.js
+
+# Cookies de sessão do servidor (NUNCA commitar)
+server/cookies.json
+
+# Cache do WhatsApp Web.js (grande e gerado automaticamente)
+server/.wwebjs_cache/
+.wwebjs_cache/
+
+# Cache do Puppeteer/Chromium (baixado automaticamente)
+server/.local-chromium/
+server/node_modules/.cache/
+
+# Licença local do Electron (gerada por máquina)
+# Não commitar — cada instalação gera o seu

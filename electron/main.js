@@ -273,7 +273,13 @@ app.whenReady().then(async () => {
 
     if (licenseValid) {
         startServer();
-        setTimeout(createMainWindow, 2000);
+        setTimeout(() => {
+            createMainWindow();
+            // Verifica atualizações no boot quando a licença já está em cache
+            if (app.isPackaged && autoUpdater) {
+                setTimeout(() => autoUpdater.checkForUpdatesAndNotify(), 5000);
+            }
+        }, 2000);
     } else {
         createLicenseWindow();
     }
@@ -291,18 +297,61 @@ app.on('before-quit', () => {
 // Auto Updater
 // ─────────────────────────────────────────────────────────────────
 if (autoUpdater) {
-    autoUpdater.on('update-available', () => {
-        console.log('[Updater] Atualização disponível. Baixando...');
+    // Não pergunta ao usuário se quer verificar — faz silenciosamente
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    console.log(`[Updater] Versão atual: ${app.getVersion()}`);
+
+    autoUpdater.on('checking-for-update', () => {
+        console.log('[Updater] Verificando atualizações...');
     });
 
-    autoUpdater.on('update-downloaded', () => {
+    autoUpdater.on('update-available', (info) => {
+        console.log(`[Updater] Nova versão disponível: ${info.version}. Baixando...`);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-status', {
+                type: 'downloading',
+                version: info.version,
+                message: `Baixando atualização ${info.version}...`
+            });
+        }
+    });
+
+    autoUpdater.on('update-not-available', () => {
+        console.log('[Updater] Aplicativo já está na versão mais recente.');
+    });
+
+    autoUpdater.on('download-progress', (progress) => {
+        const pct = Math.round(progress.percent);
+        console.log(`[Updater] Download: ${pct}% (${Math.round(progress.transferred / 1024)}KB / ${Math.round(progress.total / 1024)}KB)`);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-status', {
+                type: 'progress',
+                percent: pct,
+                message: `Baixando atualização... ${pct}%`
+            });
+        }
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        console.log(`[Updater] Download concluído: v${info.version}`);
         dialog.showMessageBox({
             type: 'info',
-            title: 'Atualização Pronta',
-            message: 'Uma nova versão do Browze Bot está pronta. Deseja reiniciar para atualizar agora?',
+            title: '🚀 Atualização Pronta',
+            message: `Browze Bot v${info.version} foi baixado.`,
+            detail: 'Deseja reiniciar agora para aplicar a atualização? Você pode fazer isso depois também.',
             buttons: ['Reiniciar Agora', 'Depois'],
+            defaultId: 0,
+            cancelId: 1,
         }).then(result => {
-            if (result.response === 0) autoUpdater.quitAndInstall();
+            if (result.response === 0) autoUpdater.quitAndInstall(false, true);
         });
+    });
+
+    autoUpdater.on('error', (err) => {
+        console.error('[Updater] Erro ao atualizar:', err.message);
+        // Não exibe dialog de erro para o usuário — apenas loga
+        // Erros de rede são comuns e não precisam alarmar o cliente
     });
 }

@@ -582,9 +582,11 @@ class BotEngine {
         } else {
             // When AI Auto Message is ON → NEVER fall back to manual template.
             // If the AI didn't generate a customMessage, skip DM and warn (don't spam with generic text).
+            // When aiAutoMessage is OFF (even if aiMode is ON for filtering), always use the manual template.
             if (this.config.aiAutoMessage && !aiMessage) {
                 this.log(`[AI] ⚠️ Modo I.A. Total: I.A. não gerou mensagem para @${username}. DM pulado para evitar mensagem genérica.`, 'warning');
             } else {
+            // If aiAutoMessage is OFF, aiMessage will be null → falls back to manual dmTemplate
             const effectiveDmTemplate = aiMessage || this.config.dmTemplate;
             
             if (effectiveDmTemplate) {

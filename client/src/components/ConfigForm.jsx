@@ -375,7 +375,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
                         <div className="flex-1 min-w-0">
                             <label className="text-sm font-bold flex items-center gap-2 cursor-pointer" style={{ color: config.aiAutoMessage ? '#e9d5ff' : '#a78bfa' }}>
                                 <span className="text-lg">🤖</span>
-                                Deixe a I.A. enviar a mensagem
+                                I.A. gera a mensagem
                                 {config.aiAutoMessage && (
                                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full animate-pulse" style={{ background: 'rgba(168,85,247,0.25)', color: '#c4b5fd', border: '1px solid rgba(168,85,247,0.4)' }}>
                                         ATIVO
@@ -383,7 +383,9 @@ const ConfigForm = ({ onStart, isRunning }) => {
                                 )}
                             </label>
                             <p className="text-xs mt-1" style={{ color: '#64748b' }}>
-                                A I.A. lê o perfil e escreve uma mensagem 100% personalizada para converter — sem usar o template manual.
+                                {config.aiAutoMessage
+                                    ? 'A I.A. lê o perfil e escreve uma mensagem 100% personalizada — template manual ignorado.'
+                                    : <><span style={{ color: '#94a3b8' }}>Desativado:</span> a I.A. só aprova/rejeita o perfil e o bot envia o <strong style={{ color: '#cbd5e1' }}>template padrão</strong> normalmente.</>}
                             </p>
                         </div>
                         <input
@@ -393,13 +395,15 @@ const ConfigForm = ({ onStart, isRunning }) => {
                             onChange={(e) => setConfig({
                                 ...config,
                                 aiAutoMessage: e.target.checked,
-                                // Auto-enable aiMode when aiAutoMessage is turned on
-                                aiMode: e.target.checked ? true : config.aiMode
                             })}
                             className="w-5 h-5 accent-purple-500 rounded cursor-pointer mt-0.5 shrink-0"
-                            disabled={isRunning}
+                            disabled={isRunning || !config.aiMode}
+                            title={!config.aiMode ? 'Ative a Prospecção com I.A. primeiro' : ''}
                         />
                     </div>
+                    {!config.aiMode && (
+                        <p className="text-xs" style={{ color: '#475569' }}>⚠️ Ative a <strong style={{ color: '#38bdf8' }}>Prospecção com I.A.</strong> acima para habilitar este modo.</p>
+                    )}
 
                     {config.aiAutoMessage && (
                         <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-2">
@@ -431,7 +435,7 @@ const ConfigForm = ({ onStart, isRunning }) => {
                                     <li>Decide se é lead com base no Objetivo acima</li>
                                     <li>Escreve mensagem citando dados reais do perfil</li>
                                     <li>Escolhe CTA ideal para converter aquela pessoa</li>
-                                    <li>Envia — template manual ignorado</li>
+                                    <li>Envia — <strong style={{ color: '#c4b5fd' }}>template manual ignorado</strong></li>
                                 </ol>
                             </div>
                         </div>

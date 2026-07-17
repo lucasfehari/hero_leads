@@ -357,7 +357,7 @@ Responda APENAS com JSON válido (sem markdown, sem texto extra):
     "shouldComment": boolean,
     "customComment": "string (opcional, vazio usa comentário manual do usuário)",
     "shouldDM": boolean,
-    "customMessage": "string (OBRIGATÓRIO se shouldDM=true — personalizado com bio/nome do perfil)",
+    "customMessage": "string (${config.aiAutoMessage ? 'OBRIGATÓRIO se shouldDM=true — personalizado com bio/nome do perfil' : 'DEIXE VAZIO — a mensagem padrão do operador será usada'})",
     "sleepAfterMs": number
   }
 }${aiAutoSection}`;
