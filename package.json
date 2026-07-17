@@ -12,7 +12,7 @@
         "dev": "concurrently --names \"SERVER,CLIENT\" --prefix-colors \"green,cyan\" \"npm run start:server\" \"npm run start:client\"",
         "build:client": "npm run build --prefix client",
         "electron:dev": "concurrently --names \"CLIENT,ELECTRON\" --prefix-colors \"cyan,yellow\" \"npm run start:client\" \"wait-on http://localhost:5173 && electron .\"",
-        "rebuild:native": "electron-rebuild -f -w better-sqlite3 --module-dir server",
+        "rebuild:native": "npx @electron/rebuild -f -w better-sqlite3 --module-dir server",
         "electron:build": "npm run rebuild:native && npm run build:client && electron-builder",
         "electron:build:win": "npm run rebuild:native && npm run build:client && electron-builder --win --x64",
         "release:patch": "npm version patch && git push && git push --tags",
@@ -90,9 +90,9 @@
         }
     },
     "devDependencies": {
-        "@electron/rebuild": "^3.7.1",
+        "@electron/rebuild": "^4.2.0",
         "concurrently": "^9.1.2",
-        "electron": "33.2.1",
+        "electron": "33.4.11",
         "electron-builder": "^25.1.8",
         "electron-updater": "^6.3.9",
         "wait-on": "^8.0.1"
