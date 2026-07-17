@@ -1,6 +1,6 @@
 {
     "name": "browze-bot",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Browze Bot — Automation Suite for Instagram, WhatsApp, Google Maps and Social Media",
     "main": "electron/main.js",
     "private": true,
