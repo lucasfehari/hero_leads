@@ -775,12 +775,12 @@ const openDMViaInboxSearch = async (page, username) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // SEND DM — Ponto de entrada principal
 // ─────────────────────────────────────────────────────────────────────────────
-const sendDM = async (page, username, message, audios = []) => {
+const sendDM = async (page, username, message, audios = [], skipOpen = false) => {
     try {
         const currentUrl = page.url();
 
-        // Se já estiver numa thread específica com esta pessoa, pular abertura
-        const alreadyInThread = currentUrl.includes('/direct/t/');
+        // Se já estiver numa thread específica com esta pessoa, ou se for a segunda mensagem da sequência (skipOpen)
+        const alreadyInThread = skipOpen || currentUrl.includes('/direct/t/');
 
         if (!alreadyInThread) {
             console.log(`[DM] Iniciando abertura do chat para @${username}...`);
@@ -790,7 +790,7 @@ const sendDM = async (page, username, message, audios = []) => {
                 return false;
             }
         } else {
-            console.log(`[DM] Já está na thread do chat — pulando abertura.`);
+            console.log(`[DM] Já está na thread do chat (ou é sequência) — pulando abertura.`);
             await randomDelay(500, 1000);
         }
 

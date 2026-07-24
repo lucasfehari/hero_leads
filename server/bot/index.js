@@ -611,14 +611,18 @@ class BotEngine {
             this.log(`Sending DM(s) to @${username}...`);
 
             let allSent = true;
-            for (const msg of messagesToSend) {
-                const sent = await sendDM(this.page, username, msg, this.config.audios);
+            for (let i = 0; i < messagesToSend.length; i++) {
+                const msg = messagesToSend[i];
+                const isSubsequentMessage = i > 0;
+                const sent = await sendDM(this.page, username, msg, this.config.audios, isSubsequentMessage);
                 if (!sent) {
                     allSent = false;
                     break;
                 }
                 // Small pause between multiple messages to same person
-                if (messagesToSend.length > 1) await randomDelay(2000, 4000);
+                if (messagesToSend.length > 1 && i < messagesToSend.length - 1) {
+                    await randomDelay(2000, 4000);
+                }
             }
 
             if (allSent) {
